@@ -309,6 +309,19 @@ def validate_worker_fixture(owner=None, group=None):
 
 
 @contextmanager
+def prepared_root_worker(runner, vm):
+    """Warm the explicit administrator channel before the ownership lease begins."""
+    if not os.environ.get('MVM_WORKER_STALL_ADMIN_TICKET'):
+        yield
+        return
+    assert os.getuid() > 0 and os.geteuid() == os.getuid()
+    assert os.environ.get('MVM_TEST_QUALIFICATION_HOST') == os.environ.get('MVM_TEST_VM') == runner
+    assert runner
+    with _administrator_preparation(vm['binding']['id']):
+        yield
+
+
+@contextmanager
 def stalled_root_worker(runner, vm):
     assert os.getuid() > 0 and os.geteuid() == os.getuid()
     assert os.environ.get('MVM_TEST_QUALIFICATION_HOST') == os.environ.get('MVM_TEST_VM') == runner
@@ -399,7 +412,7 @@ def _admin_wait(path, owner, deadline):
 
 
 @contextmanager
-def _administrator_stall(vm_id):
+def _administrator_preparation(vm_id):
     ticket_path = Path(os.environ['MVM_WORKER_STALL_ADMIN_TICKET'])
     assert ticket_path.name == 'worker-stall-admin.json'
     assert re.fullmatch(re.escape(str(Path.home() / '.cache/mvmctl-qualification-')) + r'[0-9a-f]{32}', str(ticket_path.parent))
@@ -415,20 +428,46 @@ def _administrator_stall(vm_id):
     request = _admin_validate(request, request=True)
     _admin_write(ticket_path.parent / 'worker-stall-request.json', request)
     try:
+        envelope = _admin_wait(ticket_path.parent / 'worker-stall-ready.json', os.getuid(), time.monotonic() + 120)
+        assert set(envelope) == {'request', 'status'} and envelope['request'] == request
+        assert envelope['status'] == 'READY_WITHOUT_SIGNALS'
+        yield
+    finally:
+        _administrator_continue(ticket_path, request)
+
+
+def _administrator_continue(ticket_path, request):
+    path = ticket_path.parent / 'worker-stall-continue.json'
+    try:
+        _admin_write(path, request)
+    except FileExistsError:
+        assert _admin_read(path, os.getuid()) == request
+    ack = _admin_wait(ticket_path.parent / 'worker-stall-continued.json', os.getuid(), time.monotonic() + 20)
+    assert set(ack) == {'request', 'returncode', 'output'} and ack['request'] == request
+    assert type(ack['returncode']) is int and ack['returncode'] == 0
+    assert ack['output'].strip() in {'CONTINUED_EXACT_ROOT_WORKER', 'CANCELLED_WITHOUT_SIGNALS'}
+    return ack
+
+
+@contextmanager
+def _administrator_stall(vm_id):
+    ticket_path = Path(os.environ['MVM_WORKER_STALL_ADMIN_TICKET'])
+    request = _admin_validate(_admin_read(ticket_path.parent / 'worker-stall-request.json', os.getuid()), request=True)
+    assert request == dict(_admin_read(ticket_path, os.getuid()), vm_id=vm_id)
+    ready = _admin_read(ticket_path.parent / 'worker-stall-ready.json', os.getuid())
+    assert ready == dict(request=request, status='READY_WITHOUT_SIGNALS')
+    try:
+        # This fixed mailbox is the only transition that permits a worker stop.
+        _admin_write(ticket_path.parent / 'worker-stall-stop.json', request)
         envelope = _admin_wait(ticket_path.parent / 'worker-stall-admitted.json', os.getuid(), time.monotonic() + 40)
         assert set(envelope) == {'request', 'admission'} and envelope['request'] == request
         yield _admin_admission(request, envelope['admission'])
     finally:
-        # Always request CONT, including admission/report/test failures. The external
-        # administrator also sends CONT from its own finally using the retained pipe.
-        _admin_write(ticket_path.parent / 'worker-stall-continue.json', request)
-        ack = _admin_wait(ticket_path.parent / 'worker-stall-continued.json', os.getuid(), time.monotonic() + 20)
-        assert set(ack) == {'request', 'returncode', 'output'} and ack['request'] == request
-        assert type(ack['returncode']) is int and ack['returncode'] == 0
+        ack = _administrator_continue(ticket_path, request)
         assert ack['output'].strip() == 'CONTINUED_EXACT_ROOT_WORKER'
 
 
-def _administrator_root_observer(request, source_sha256, candidate_sha256):
+def _administrator_binding(request, source_sha256, candidate_sha256):
     """Explicit root-SSH administrator entry; it never claims sudo provenance."""
     assert os.getuid() == os.geteuid() == 0
     _admin_validate(request, request=True)
@@ -444,6 +483,27 @@ def _administrator_root_observer(request, source_sha256, candidate_sha256):
         assert stat.S_IMODE(row.st_mode) == 0o755 and row.st_nlink == 1
         assert hashlib.sha256(stream.read()).hexdigest() == candidate_sha256
         assert _fingerprint(os.fstat(stream.fileno())) == _fingerprint(row)
+    return user
+
+
+def _administrator_root_observer(request, source_sha256, candidate_sha256):
+    """Warm without root locks or pidfds; admit the exact worker only after STOP."""
+    _administrator_binding(request, source_sha256, candidate_sha256)
+    print('READY_WITHOUT_SIGNALS', flush=True)
+    # Read one byte at a time: buffered stdin must not prefetch the later CONT
+    # consumed by the unchanged root observer's select/readline protocol.
+    token = b''; deadline = time.monotonic() + 40
+    while not token.endswith(b'\n'):
+        remaining = deadline - time.monotonic()
+        assert remaining > 0 and select.select([sys.stdin], [], [], remaining)[0], 'prepared observer STOP unavailable'
+        byte = os.read(sys.stdin.fileno(), 1)
+        assert byte and len(token) < 5, 'invalid fixed preparation completion'
+        token += byte
+    if token == b'CONT\n':
+        print('CANCELLED_WITHOUT_SIGNALS', flush=True)
+        return
+    assert token == b'STOP\n', 'invalid fixed preparation completion'
+    user = _administrator_binding(request, source_sha256, candidate_sha256)
     _root_observer(request['vm_id'], user['uid'], user['gid'])
 
 

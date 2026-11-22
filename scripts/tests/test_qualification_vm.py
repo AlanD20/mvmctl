@@ -386,34 +386,44 @@ def test_admin_worker_request_cannot_rebind_ticket(orchestrator,admin_stall,faul
         orchestrator.qualification_vm._require_admin_request(orchestrator,descriptor,request)
 
 
-@pytest.mark.parametrize('failure',[None,'admission','test','ack'])
+@pytest.mark.parametrize('failure',[None,'prepare','before-stop','admission','test','ack'])
 def test_operator_admin_stall_always_requests_exact_cont(orchestrator,admin_stall,monkeypatch,tmp_path,failure):
     import os
     helper,descriptor,request,admission=admin_stall
     # Execute the real context manager with only its transport wait injected.
-    namespace=helper['_administrator_stall'].__wrapped__.__globals__
+    namespace=helper['_administrator_preparation'].__wrapped__.__globals__
     monkeypatch.setattr(Path,'home',classmethod(lambda cls:tmp_path))
     task=tmp_path/'.cache'/('mvmctl-qualification-'+'a'*32);task.mkdir(parents=True,mode=0o700)
     ticket=descriptor['ticket'];helper['_admin_write'](task/'worker-stall-admin.json',ticket)
     monkeypatch.setenv('MVM_WORKER_STALL_ADMIN_TICKET',str(task/'worker-stall-admin.json'))
     def wait(path,owner,deadline):
         actual=helper['_admin_read'](task/'worker-stall-request.json',os.getuid())
+        if path.name=='worker-stall-ready.json':
+            assert not (task/'worker-stall-stop.json').exists()
+            if failure=='prepare':raise AssertionError('preparation unavailable')
+            return dict(request=actual,status='READY_WITHOUT_SIGNALS')
         if path.name=='worker-stall-admitted.json':
+            assert helper['_admin_read'](task/'worker-stall-stop.json',os.getuid())==request
             if failure=='admission':raise AssertionError('admission unavailable')
             return dict(request=actual,admission=admission)
         return dict(request=actual,returncode=1 if failure=='ack' else 0,output='CONTINUED_EXACT_ROOT_WORKER')
     monkeypatch.setitem(namespace,'_admin_wait',wait)
     def run():
-        with helper['_administrator_stall'](request['vm_id']) as received:
-            assert received==admission
-            if failure=='test':raise AssertionError('test failure')
+        with helper['_administrator_preparation'](request['vm_id']):
+            assert not (task/'worker-stall-stop.json').exists()
+            helper['_admin_write'](task/'worker-stall-ready.json',dict(request=request,status='READY_WITHOUT_SIGNALS'))
+            if failure=='before-stop':raise AssertionError('pre-lease test failure')
+            with helper['_administrator_stall'](request['vm_id']) as received:
+                assert received==admission
+                if failure=='test':raise AssertionError('test failure')
     if failure is None:run()
     else:
         with pytest.raises(AssertionError):run()
     assert helper['_admin_read'](task/'worker-stall-continue.json',os.getuid())==request
+    assert (task/'worker-stall-stop.json').exists() is (failure not in ('prepare','before-stop'))
 
 
-@pytest.mark.parametrize('fault',[None,'admission','publish','continue','native','output','cancelled'])
+@pytest.mark.parametrize('fault',[None,'ready','cancel-after-ready','stop','admission','publish','continue','native','output','cancelled'])
 def test_outside_admin_observer_finally_cont_and_independent_closure(
     orchestrator,admin_stall,monkeypatch,tmp_path,fault,
 ):
@@ -424,7 +434,8 @@ def test_outside_admin_observer_finally_cont_and_independent_closure(
     sent=[];published=[]
     class Channel:
         returncode=None
-        stdout=io.StringIO('not json\n' if fault=='admission' else json.dumps(admission)+'\n')
+        stdin=io.StringIO()
+        stdout=io.StringIO(('wrong\n' if fault=='ready' else 'READY_WITHOUT_SIGNALS\n')+('not json\n' if fault=='admission' else json.dumps(admission)+'\n'))
         def communicate(self,value,timeout):
             sent.append(value);self.returncode=1 if fault=='native' else 0
             return ('wrong' if fault=='output' else 'CONTINUED_EXACT_ROOT_WORKER\n','')
@@ -438,6 +449,10 @@ def test_outside_admin_observer_finally_cont_and_independent_closure(
     def read(*args):
         reads.append(args[-1])
         if len(reads)==1:return request if fault=='cancelled' else None
+        if args[-1]=='worker-stall-stop.json':
+            assert published[-1][0]=='worker-stall-ready.json'
+            return dict(request,nonce='e'*32) if fault=='stop' else request
+        if len(reads)==2:return request if fault=='cancel-after-ready' else None
         return dict(request,nonce='e'*32) if fault=='continue' else request
     monkeypatch.setattr(q,'_admin_guest_read',read)
     def run():return q._drive_admin_observer(orchestrator,descriptor,request,['explicit-root-observer'],evidence,popen=lambda *a,**k:child)
@@ -449,6 +464,7 @@ def test_outside_admin_observer_finally_cont_and_independent_closure(
     if fault=='cancelled':
         assert sent==[] and not (evidence/'admin-worker-observer.json').exists()
         return
+    assert child.stdin.getvalue()==('' if fault in ('ready','cancel-after-ready','stop') else 'STOP\n')
     assert sent==['CONT\n']
     assert (evidence/'admin-worker-observer.json').exists()
     assert published[-1][0]=='worker-stall-continued.json'
@@ -582,3 +598,81 @@ def test_admin_ssh_command_comment_does_not_weaken_exact_pin(orchestrator,namesp
     with pytest.raises(RuntimeError,match='differs from retained exact target'):
         orchestrator.qualification_vm._admin_ssh_command(namespace,tmp_path/'outside-private-key',known,'pinned observer')
     assert known.read_bytes()==original
+
+
+@pytest.mark.parametrize('token,changed', [(b'STOP\nCONT\n', False), (b'STOP\n', True),
+                                         (b'CONT\n', False), (b'WRONG\n', False), (b'', False)])
+def test_prepared_root_observer_waits_without_worker_authority_and_revalidates(
+    admin_stall, monkeypatch, capsys, token, changed,
+):
+    import os
+    helper, _, request, _ = admin_stall
+    namespace = helper['_administrator_root_observer'].__globals__
+    bindings = []; admitted = []
+    def binding(*args):
+        bindings.append(args)
+        if changed and len(bindings) == 2:raise AssertionError('fresh binding changed')
+        return request['operator']
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, token)
+        os.close(write_fd); write_fd = None
+        with os.fdopen(read_fd, 'rb', buffering=0) as incoming:
+            monkeypatch.setattr(namespace['sys'], 'stdin', incoming)
+            monkeypatch.setitem(namespace, '_administrator_binding', binding)
+            def observer(*args):
+                assert len(bindings) == 2
+                assert capsys.readouterr().out == 'READY_WITHOUT_SIGNALS\n'
+                # Warm token parsing must leave CONT for the existing core reader.
+                assert os.read(incoming.fileno(), 5) == b'CONT\n'
+                admitted.append(args)
+            monkeypatch.setitem(namespace, '_root_observer', observer)
+            def run():helper['_administrator_root_observer'](request, request['source_sha256'], request['candidate_sha256'])
+            if changed or token in (b'WRONG\n', b''):
+                with pytest.raises(AssertionError):run()
+            else:run()
+        assert bool(admitted) is (token == b'STOP\nCONT\n' and not changed)
+        assert len(bindings) == (2 if token.startswith(b'STOP') else 1)
+        if token == b'CONT\n':
+            assert capsys.readouterr().out == 'READY_WITHOUT_SIGNALS\nCANCELLED_WITHOUT_SIGNALS\n'
+    finally:
+        if write_fd is not None:os.close(write_fd)
+
+
+def test_preparation_is_noop_for_existing_sudo_mode(admin_stall, monkeypatch):
+    helper, _, _, _ = admin_stall
+    namespace = helper['prepared_root_worker'].__wrapped__.__globals__
+    monkeypatch.delenv('MVM_WORKER_STALL_ADMIN_TICKET', raising=False)
+    monkeypatch.setitem(namespace, '_administrator_preparation', lambda *a:pytest.fail('unexpected admin channel'))
+    with helper['prepared_root_worker']('ordinary-runner', {'binding': {'id': 'c'*32}}):
+        pass
+
+
+
+def test_ordinary_sudo_stall_keeps_existing_admission_and_continuation(admin_stall, monkeypatch):
+    import io
+    helper, _, request, admission = admin_stall
+    namespace = helper['stalled_root_worker'].__wrapped__.__globals__
+    monkeypatch.delenv('MVM_WORKER_STALL_ADMIN_TICKET', raising=False)
+    monkeypatch.setenv('MVM_TEST_VM', 'ordinary-runner')
+    monkeypatch.setenv('MVM_TEST_QUALIFICATION_HOST', 'ordinary-runner')
+    calls = []
+    monkeypatch.setitem(namespace, 'validate_worker_fixture', lambda:calls.append('fixture'))
+    child = SimpleNamespace(stdout=io.StringIO(json.dumps(admission)+'\n'), returncode=None)
+    def communicate(value, timeout):
+        assert value == 'CONT\n' and timeout == 20
+        calls.append('CONT');child.returncode=0
+        return 'CONTINUED_EXACT_ROOT_WORKER', ''
+    child.communicate = communicate
+    def spawn(command, **kwargs):
+        assert calls == ['fixture']
+        assert command[0:2] == ['/usr/bin/sudo', '-n']
+        calls.append('sudo')
+        return child
+    monkeypatch.setattr(namespace['subprocess'], 'Popen', spawn)
+    monkeypatch.setattr(namespace['select'], 'select', lambda readers,*a:(readers,[],[]))
+    with helper['prepared_root_worker']('ordinary-runner', {'binding': {'id': request['vm_id']}}):
+        assert calls == []
+        with helper['stalled_root_worker']('ordinary-runner', {'binding': {'id': request['vm_id']}}) as stopped:
+            assert stopped == admission and calls == ['fixture', 'sudo']
+    assert calls == ['fixture', 'sudo', 'CONT']

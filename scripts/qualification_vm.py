@@ -423,7 +423,7 @@ def _prepare_admin_stall(o, namespace, guest_task, source, candidate, before, ev
 
 
 def _admin_guest_read(o, descriptor, name):
-    assert name in {"worker-stall-request.json", "worker-stall-continue.json", "worker-stall-admin.json"}
+    assert name in {"worker-stall-request.json", "worker-stall-continue.json", "worker-stall-stop.json", "worker-stall-admin.json"}
     script = r"""
 import json,os,stat,sys
 try:fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NOFOLLOW)
@@ -461,7 +461,7 @@ def _require_admin_request(o, descriptor, request):
 
 
 def _admin_guest_write(o, descriptor, name, value):
-    assert name in {"worker-stall-admitted.json", "worker-stall-continued.json"}
+    assert name in {"worker-stall-ready.json", "worker-stall-admitted.json", "worker-stall-continued.json"}
     # Load the pinned helper only as the ordinary operator, never as root.
     script = "import runpy,sys,json;from pathlib import Path;m=runpy.run_path(sys.argv[1]);m['_admin_write'](Path(sys.argv[2]),json.loads(sys.argv[3]))"
     _command(o, descriptor["namespace"], script, descriptor["guest_task"] + "/source/" + _ADMIN_HELPER,
@@ -477,7 +477,7 @@ def _run_admin_stall_case(o, descriptor, evidence, execute):
                 if request is not None:
                     _require_admin_request(o, descriptor, request)
                     _write(evidence, "admin-worker-request.json", _encode(request))
-                    print("ADMIN WORKER STALL REQUEST " + json.dumps(request,sort_keys=True),flush=True)
+                    print("ADMIN WORKER STALL PREPARE " + json.dumps(request,sort_keys=True),flush=True)
                     return
             except Exception as error:
                 errors.append(error);return
@@ -523,6 +523,23 @@ def _drive_admin_observer(o, descriptor, request, command, evidence, *, popen=su
     child = popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     admission = None; output = errors = ""; failure = None
     try:
+        if not select.select([child.stdout],[],[],120)[0]:raise RuntimeError("root observer preparation unavailable")
+        if child.stdout.readline(16385).strip() != "READY_WITHOUT_SIGNALS":
+            raise RuntimeError("root observer preparation refused")
+        _admin_guest_write(o,descriptor,"worker-stall-ready.json",dict(request=request,status="READY_WITHOUT_SIGNALS"))
+        deadline = time.monotonic()+40
+        while time.monotonic()<deadline:
+            continuation = _admin_guest_read(o,descriptor,"worker-stall-continue.json")
+            if continuation is not None:
+                if continuation != request:raise RuntimeError("administrator cancellation rebound")
+                raise RuntimeError("administrator preparation cancelled before STOP")
+            stop = _admin_guest_read(o,descriptor,"worker-stall-stop.json")
+            if stop is not None:
+                if stop != request:raise RuntimeError("administrator STOP request rebound")
+                child.stdin.write('STOP\n');child.stdin.flush()
+                break
+            time.sleep(.1)
+        else:raise RuntimeError("administrator STOP request unavailable")
         if not select.select([child.stdout],[],[],40)[0]:raise RuntimeError("root observer admission unavailable")
         line = child.stdout.readline(16385)
         admission = json.loads(line)
