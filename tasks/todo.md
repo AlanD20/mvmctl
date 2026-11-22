@@ -100,8 +100,9 @@ Earlier checked items describe the qualified baseline; they do not qualify this 
   paired host and guest agent and install the candidate inside the named QA VM with inventories preserved.
 - [x] Complete affected Python system qualification in `mvmctl-030-test` and update public Markdown guidance.
 - [x] Prepare and review the website source update; source commit and publication remain HELD.
-- [ ] Integrate the reviewed feature into `0.3.0-release`; final CI passes, integration-owner sign-off pending.
-- [ ] Complete expanded release qualification after integration.
+- [x] Integrate the reviewed feature into `0.3.0-release` at `a84d8958`, with final CI and integration-owner
+  feature sign-off complete.
+- [ ] Complete expanded whole-release sign-off — HELD separately from feature qualification and integration.
 - [ ] Obtain the user's separate authorization before merging the release PR to `main`, tagging or publishing
   — all three remain HELD.
 
@@ -130,8 +131,9 @@ No persistent observer helper or grant is needed. Final integration Go CI passes
 every prescribed stage exits zero. Complete root Jailer has 923 top-level passes and the same two intentional
 private-entrypoint skips; root alias/operator has 21 top-level passes with no skips. Before/after source
 manifests match and the installed candidate is unchanged. Evidence:
-`.tmp/ci-final-guest-control-nov22/{summary,proof}.json`. Feature qualification is complete and prepared for
-release-branch integration; integration-owner sign-off is pending. No gate is waived.
+`.tmp/ci-final-guest-control-nov22/{summary,proof}.json`. Feature qualification and integration-owner feature
+sign-off are complete; `0.3.0-release` was fast-forwarded to `a84d8958`. Expanded whole-release sign-off
+remains separate and held. No gate is waived.
 Full Kubernetes bootstrap, quorum testing and larger-VM qualification remain outside this goal. These results
 do not qualify the release.
 

@@ -6,8 +6,9 @@
 
 **Status (2026-11-22):** The previously qualified baseline is complete. The user has expanded 0.3.0 to include
 Guest Control, floating IPs and the HA Kubernetes example repair. Implementation, review and scoped feature
-qualification are complete and prepared for integration into `0.3.0-release`. Integration-owner sign-off and
-expanded release qualification remain pending. Merge to `main`, tagging and publication remain on hold.
+qualification are complete, with integration-owner feature sign-off. The release branch was fast-forwarded
+to `a84d8958`. Expanded whole-release sign-off remains separate and held. Merge to `main`, tagging and
+publication remain on hold.
 
 ## Guest Control and floating IP scope
 
@@ -62,7 +63,7 @@ packet fencing passes with unchanged 24-second leases and timing/traffic asserti
 and preserved inventory. The explicit administrator transport pre-arms before any grant or association; no
 persistent helper or grant is needed. Final integration Go CI and complete root Jailer/agent alias checks pass
 on clean QA source `a84d8958`, including the production startup and prior-boot recovery corrections. The
-feature is prepared for release-branch integration; integration-owner sign-off remains pending. No gate is waived.
+feature has integration-owner sign-off and is integrated into `0.3.0-release` at `a84d8958`. No gate is waived.
 The public
 [Guest Control guide](../docs/GUEST_CONTROL.md) and [environment reference](../docs/ENV_SPEC_REFERENCE.md)
 describe the implemented surface; website publication remains held.
