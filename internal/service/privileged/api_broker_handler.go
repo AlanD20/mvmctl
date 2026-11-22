@@ -62,6 +62,16 @@ func handleVMAPIBroker(
 	}
 	if action == jailer.VMResumeAction || action == jailer.VMStartInstanceAction {
 		if err := reconcileGuestControlWorker(ctx, caller.uid, caller.gid, request.Body.VMID); err != nil {
+			if action == jailer.VMResumeAction {
+				details := map[string]any{"vm_state": "running"}
+				if cause := errs.AsDomainError(err); cause != nil {
+					details["guest_control_code"] = string(cause.Code)
+					details["guest_control_message"] = cause.Message
+				}
+				err = errs.WrapMsg(errs.CodeVMResumeGuestControlFailed,
+					"VM resumed. Guest Control reconciliation failed", err,
+					errs.WithEntity(result.VMID), errs.WithDetails(details))
+			}
 			return deliverOperationError(ctx, endpoint, action, err, deps)
 		}
 	}

@@ -1,6 +1,10 @@
 package jailer
 
-import "context"
+import (
+	"context"
+
+	"mvmctl/pkg/errs"
+)
 
 // VMAPIBrokerClient exposes only the named VM control operations supported by ordinary callers.
 type VMAPIBrokerClient struct{ transport *TrustedReleaseClient }
@@ -28,13 +32,22 @@ func (client *VMAPIBrokerClient) Pause(ctx context.Context, request VMAPIRequest
 		func(result VMAPIResult) error { return result.Validate(request) })
 }
 
-// Resume asks the root broker to resume one exact active VM.
+// Resume asks the root broker to resume one exact active VM. A confirmed result
+// may accompany a Guest Control reconciliation error.
 func (client *VMAPIBrokerClient) Resume(ctx context.Context, request VMAPIRequest) (VMAPIResult, error) {
 	if err := request.Validate(); err != nil {
 		return VMAPIResult{}, err
 	}
-	return exchangeTrustedRelease(ctx, client.transport, VMResumeAction, request, nil, 0,
+	result, err := exchangeTrustedRelease(ctx, client.transport, VMResumeAction, request, nil, 0,
 		func(result VMAPIResult) error { return result.Validate(request) })
+	// The dispatcher sets this action-specific error only after confirming
+	// the Firecracker transition. Transport errors never carry that proof.
+	if failure := errs.AsDomainError(err); failure != nil &&
+		failure.Code == errs.CodeVMResumeGuestControlFailed &&
+		failure.Entity == request.VMID && failure.Details["vm_state"] == "running" {
+		result = VMAPIResult{VMID: request.VMID, Applied: true}
+	}
+	return result, err
 }
 
 // StartInstance starts the already admitted Firecracker instance; it never launches a process.

@@ -836,7 +836,7 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 	); err != nil {
 		return err
 	}
-	if err := revokeIsolatedPersistentOutputs(cleanupCtx, state.record); err != nil {
+	if err := revokeIsolatedPersistentOutputs(cleanupCtx, state); err != nil {
 		return err
 	}
 	if state.record.launch.snapshotID != "" {

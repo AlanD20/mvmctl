@@ -215,7 +215,9 @@ func revokeIsolatedPersistentOutputLease(ctx context.Context, lease *managedVMPe
 // revokeIsolatedPersistentOutputs reopens only historically recorded log/metrics inodes after
 // the lifecycle owner proves task absence. It performs no publication, truncation or directory
 // creation. Missing or replaced output files remain ambiguous rather than authorizing a new inode.
-func revokeIsolatedPersistentOutputs(ctx context.Context, record instanceRecord) (returnErr error) {
+// The caller holds the cleanup state mutex and VM lock through output revocation.
+func revokeIsolatedPersistentOutputs(ctx context.Context, cleanup *cleanupLeaseState) (returnErr error) {
+	record := cleanup.record
 	if ctx == nil {
 		return instanceStateError(record.vmID, "isolated output cleanup context is required")
 	}
@@ -229,8 +231,7 @@ func revokeIsolatedPersistentOutputs(ctx context.Context, record instanceRecord)
 		return instanceStateError(record.vmID, "isolated output revocation requires cleaning authority")
 	}
 	caller := instanceCaller{uid: record.ownerUID, gid: record.launch.ownerGID}
-	cache, err := repinManagedCache(ctx, realManagedCacheDeps(), productionManagedCachePolicy(),
-		caller, record.launch.cacheLocator, record.launch.cacheIdentity)
+	cache, err := reopenIsolatedOutputCache(ctx, cleanup, caller)
 	if err != nil {
 		return err
 	}
@@ -276,6 +277,32 @@ func revokeIsolatedPersistentOutputs(ctx context.Context, record instanceRecord)
 		}
 	}
 	return nil
+}
+
+func reopenIsolatedOutputCache(
+	ctx context.Context,
+	cleanup *cleanupLeaseState,
+	caller instanceCaller,
+) (*managedCacheLease, error) {
+	record := cleanup.record
+	deps, policy := realManagedCacheDeps(), productionManagedCachePolicy()
+	if cleanup.priorBootAbsence == nil {
+		return repinManagedCache(ctx, deps, policy, caller, record.launch.cacheLocator, record.launch.cacheIdentity)
+	}
+	hold, err := retainLifecyclePriorBootHold(ctx, cleanup.vmLock)
+	if err != nil {
+		return nil, err
+	}
+	_, err = cleanup.priorBootAbsence.Verify(ctx, hold, record.launch.hostBootID, record.launchGeneration)
+	if err != nil {
+		err = instanceAtomicError("verify prior-boot authority for persistent output cleanup", err)
+	}
+	if err := appendInstanceOperationError(err, "release prior-boot output recovery hold",
+		hold.Release(context.WithoutCancel(ctx))); err != nil {
+		return nil, err
+	}
+	return repinPersistentManagedCache(ctx, deps, policy, caller, record.launch.cacheLocator,
+		protectedCacheIdentity(record.launch.cacheIdentity))
 }
 
 // CALLER MUST HOLD: state.mu. The historical device/inode pair is recorded before ACL effects.

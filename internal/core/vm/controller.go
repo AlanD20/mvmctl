@@ -121,15 +121,22 @@ func (c *Controller) resume(ctx context.Context, broker vmResumeBroker) error {
 	}
 
 	// The cached status cannot authorize a no-op while root export recovery is pending.
-	if _, err := broker.Resume(ctx, jailersvc.VMAPIRequest{VMID: c.vm.ID}); err != nil {
+	request := jailersvc.VMAPIRequest{VMID: c.vm.ID}
+	result, resumeErr := broker.Resume(ctx, request)
+	if err := result.Validate(request); err != nil {
+		if resumeErr != nil {
+			return resumeErr
+		}
 		return err
 	}
 
-	// Only update DB, not in-memory status.
-	if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); err != nil {
-		return err
+	// Once the root broker confirms the resume, preserve that projection even if
+	// the subsequent worker reconciliation failed or the caller stopped waiting.
+	if err := c.repo.UpdateStatus(context.WithoutCancel(ctx), c.vm.ID, model.VMStatusRunning); err != nil {
+		return errors.Join(resumeErr, err)
 	}
-	return nil
+	c.vm.Status = model.VMStatusRunning
+	return resumeErr
 }
 
 // --- Start ---
