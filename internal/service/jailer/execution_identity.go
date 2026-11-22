@@ -79,7 +79,8 @@ func (lease *vmAuthorityLease) reopenExecutionIdentity(
 
 // openExecutionIdentity returns only an existing reservation for VM removal. A retiring
 // reservation still returns its credentials so removal can repeat all absence proofs after a crash.
-// A fully retired same-owner tombstone or a never-allocated VM has no remaining account lease.
+// A fully retired same-owner tombstone has no remaining account lease. Missing
+// execution authority cannot prove that an existing VM was retired.
 func (lease *vmAuthorityLease) openExecutionIdentity(
 	ctx context.Context, caller instanceCaller, vmID string,
 ) (*vmExecutionIdentityLease, error) {
@@ -116,10 +117,7 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 		return nil, err
 	}
 	if store == nil {
-		if expected != nil {
-			return nil, instanceStateError(vmID, "recorded execution reservation store is missing")
-		}
-		return nil, nil
+		return nil, instanceStateError(vmID, "recorded execution reservation store is missing")
 	}
 	defer func() { returnErr = errors.Join(returnErr, store.close(context.WithoutCancel(ctx))) }()
 	record, found, err := store.read(ctx, vmID)
@@ -157,11 +155,8 @@ func (lease *vmAuthorityLease) admitExecutionIdentity(
 			return nil, err
 		}
 	} else {
-		if expected != nil {
-			return nil, instanceStateError(vmID, "recorded execution reservation is missing")
-		}
 		if !create {
-			return nil, nil
+			return nil, instanceStateError(vmID, "recorded execution reservation is missing")
 		}
 		if err := state.accounts.requireHostTools(ctx); err != nil {
 			return nil, err

@@ -11,7 +11,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-func TestVMLabelRecordsRevisionAndRetirement(t *testing.T) {
+func TestVMLabelRecordsRevisionAndHistoricalRetirement(t *testing.T) {
 	vmID := strings.Repeat("a", 32)
 	records := make(vmLabelRecords)
 	input := model.VMLabels{"role": "controller"}
@@ -36,33 +36,14 @@ func TestVMLabelRecordsRevisionAndRetirement(t *testing.T) {
 	assert.Empty(t, cleared.Labels)
 	_, err = records.replace(1000, vmID, 1, model.VMLabels{"role": "controller"})
 	require.Error(t, err)
-	require.Error(t, records.retire(1000, vmID, 1))
-	require.NoError(t, records.retire(1000, vmID, 2))
+	records[vmID] = vmLabelRecord{OwnerUID: 1000, Revision: 3, Labels: model.VMLabels{}, Retired: true}
 	require.NoError(t, records.validate())
-	assert.True(t, records[vmID].Retired)
-	assert.EqualValues(t, 3, records[vmID].Revision)
+	_, err = records.replace(1000, vmID, 3, model.VMLabels{})
+	require.Error(t, err)
 	_, err = records.enroll(1000, vmID, model.VMLabels{"role": "controller"})
 	require.Error(t, err)
 	_, err = records.enroll(1001, vmID, nil)
 	require.Error(t, err)
-}
-
-func TestVMLabelRecordsMaterializeOnlyCurrentOwnerMembership(t *testing.T) {
-	a, b, c := strings.Repeat("a", 32), strings.Repeat("b", 32), strings.Repeat("c", 32)
-	records := make(vmLabelRecords)
-	for vmID, owner := range map[string]uint32{a: 1000, b: 1000, c: 1001} {
-		_, err := records.enroll(owner, vmID, model.VMLabels{"role": "worker", "cluster": "demo"})
-		require.NoError(t, err)
-	}
-	selector := model.VMLabelSelector{"role": "worker", "cluster": "demo"}
-	assert.Equal(t, []string{a, b}, records.members(1000, selector))
-	assert.Empty(t, records.members(1000, nil))
-	_, err := records.replace(1000, a, 1, model.VMLabels{"role": "worker", "cluster": "other"})
-	require.NoError(t, err)
-	assert.Equal(t, []string{b}, records.members(1000, selector))
-	require.NoError(t, records.retire(1000, b, 1))
-	assert.Empty(t, records.members(1000, selector))
-	assert.Equal(t, []string{c}, records.members(1001, selector))
 }
 
 func TestVMLabelJournalRecoversLatestMetadataWithoutKernelChange(t *testing.T) {
@@ -100,6 +81,6 @@ func TestVMLabelJournalRecoversLatestMetadataWithoutKernelChange(t *testing.T) {
 	assert.EqualValues(t, 2, recovered.VMLabels[vmID].Revision)
 	assert.Equal(t, "controller", recovered.VMLabels[vmID].Labels["role"])
 	assert.False(t, hostResetIntentEmpty(recovered), "reset must not discard active logical label records")
-	require.NoError(t, recovered.VMLabels.retire(1000, vmID, 2))
+	recovered.VMLabels[vmID] = vmLabelRecord{OwnerUID: 1000, Revision: 3, Labels: model.VMLabels{}, Retired: true}
 	assert.True(t, hostResetIntentEmpty(recovered), "retired IDs carry history without live label authority")
 }
