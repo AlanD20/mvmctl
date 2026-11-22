@@ -26,7 +26,8 @@ func (client *FloatingIPClient) GrantFloatingIPDelegation(
 	}
 	if result.ID != request.ID || result.ResourceID != request.ResourceID || result.VMID != request.VMID ||
 		result.Method != request.Method ||
-		result.LeaseDuration != request.LeaseDuration || result.State != "active" {
+		result.LeaseDuration != request.LeaseDuration || result.State != "active" ||
+		(request.Expected != nil && !request.Expected.Matches(result.BootID, result.LaunchGeneration, result.ExecutionUID)) {
 		return FloatingIPDelegationResult{}, floatingIPResponseError(true, true,
 			networkAuthorityValidationError("delegation grant acknowledgement differs"))
 	}

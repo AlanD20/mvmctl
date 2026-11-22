@@ -67,7 +67,8 @@ func (input FloatingIPDelegationInput) Validate() error {
 // FloatingIPDelegationEnsureInput supplies a durable creation identity, never a caller-authenticated incarnation.
 type FloatingIPDelegationEnsureInput struct {
 	FloatingIPDelegationGrantInput
-	ID string `json:"id"`
+	ID       string                            `json:"id"`
+	Expected *model.FloatingIPGrantIncarnation `json:"expected_incarnation,omitempty"`
 }
 
 func (input FloatingIPDelegationEnsureInput) Validate() error {

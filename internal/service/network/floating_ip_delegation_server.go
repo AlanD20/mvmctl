@@ -31,6 +31,10 @@ func (lease *FloatingIPVMLease) GrantFloatingIPDelegation(
 			"delegation target differs from admitted VM",
 		)
 	}
+	if expected := request.Expected; expected != nil &&
+		!expected.Matches(principal.bootID, principal.launchGeneration, principal.executionUID) {
+		return FloatingIPDelegationResult{}, networkAuthorityValidationError("delegation VM launch has changed")
+	}
 	resources, err := openFloatingIPStore(ctx, state.network.store, false)
 	if err != nil {
 		return FloatingIPDelegationResult{}, err

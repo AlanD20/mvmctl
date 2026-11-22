@@ -16,3 +16,14 @@ type FloatingIPDelegationItem struct {
 	Revision         uint64        `json:"revision" db:"revision"`
 	State            string        `json:"state" db:"state"`
 }
+
+// FloatingIPGrantIncarnation constrains a delegation to an already observed VM launch.
+type FloatingIPGrantIncarnation struct {
+	BootID           string `json:"boot_id"`
+	LaunchGeneration uint64 `json:"launch_generation"`
+	ExecutionUID     uint32 `json:"execution_uid"`
+}
+
+func (target FloatingIPGrantIncarnation) Matches(bootID string, generation uint64, uid uint32) bool {
+	return target.BootID == bootID && target.LaunchGeneration == generation && target.ExecutionUID == uid
+}

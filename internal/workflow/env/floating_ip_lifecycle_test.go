@@ -115,8 +115,10 @@ floating_ip_grant:
   inspect:
     network: "@network:cluster"
     resource: "@floating_ip:api"
-    vm: "@vm:controller"
-    method: inspect
+    vms:
+      - "@vm:controller"
+    methods:
+      - method: inspect
     depends_on: ["@floating_ip:api", "@vm:controller"]
 traffic_policy:
   api:

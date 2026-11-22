@@ -48,6 +48,13 @@ The CLI allocates, inspects, associates, moves, disassociates and removes resour
 inspection and self-association, renewal or release of an exact resource, never allocation, grant creation or
 selection of another owner. Eligible VMs must belong to the resource's network and enrolled operator.
 
+An environment grant step declares a list of exact VM selectors and a list of methods. The workflow persists
+one exact grant ID per pair before publication. After the first receipt for a VM, subsequent grants compare
+the saved boot, launch generation and execution UID under retained root admission before writing permission.
+This keeps several methods in one workflow step without creating group authority. A retry uses the original
+IDs, and teardown recovers or revokes only those grants.
+
+
 ### Ownership and fencing
 
 The Jailer admission lease retains the owned VM lock and verifies its current boot, launch generation,

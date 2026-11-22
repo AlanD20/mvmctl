@@ -83,105 +83,22 @@ floating_ip:
     depends_on:
     - '@network:k8s'
 floating_ip_grant:
-  controller-1-inspect:
-    resource: '@floating_ip:k8s-api'
+  api-controllers:
     network: '@network:k8s'
-    vm: '@vm:controller-1'
-    method: inspect
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-1'
-  controller-1-associate:
     resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-1'
-    method: associate
+    vms:
+      - '@vm:controller-1'
+      - '@vm:controller-2'
+      - '@vm:controller-3'
+    methods:
+      - method: inspect
+      - method: associate
+        lease: 10s
+      - method: renew
+        lease: 10s
+      - method: release
     depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-1'
-    lease: 10s
-  controller-1-renew:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-1'
-    method: renew
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-1'
-    lease: 10s
-  controller-1-release:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-1'
-    method: release
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-1'
-  controller-2-inspect:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-2'
-    method: inspect
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-2'
-  controller-2-associate:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-2'
-    method: associate
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-2'
-    lease: 10s
-  controller-2-renew:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-2'
-    method: renew
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-2'
-    lease: 10s
-  controller-2-release:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-2'
-    method: release
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-2'
-  controller-3-inspect:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-3'
-    method: inspect
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-3'
-  controller-3-associate:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-3'
-    method: associate
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-3'
-    lease: 10s
-  controller-3-renew:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-3'
-    method: renew
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-3'
-    lease: 10s
-  controller-3-release:
-    resource: '@floating_ip:k8s-api'
-    network: '@network:k8s'
-    vm: '@vm:controller-3'
-    method: release
-    depends_on:
-    - '@floating_ip:k8s-api'
-    - '@vm:controller-3'
+      - '@floating_ip:k8s-api'
+      - '@vm:controller-1'
+      - '@vm:controller-2'
+      - '@vm:controller-3'

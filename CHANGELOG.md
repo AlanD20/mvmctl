@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Batch floating-IP delegation in environment specs with explicit VM and method lists. Each grant remains
+  bound to one VM launch, and workflow retries and teardown use the saved grant IDs.
 - Added VM labels and live selectors for traffic and VM-to-VM exec policies, including environment specs.
   Label changes apply to established traffic and to new exec admissions. Exec policies are stored and
   enforced by root. The HA example uses selectors to express the same grants across its six VMs.

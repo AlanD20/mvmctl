@@ -75,7 +75,7 @@ func (op *Operation) FloatingIPDelegationEnsure(
 		return nil, err
 	}
 	result, err := op.floatingIPAuthority.GrantFloatingIPDelegation(ctx, input.ID, input.Network, input.Resource,
-		input.VM, input.Method, duration)
+		input.VM, input.Method, duration, input.Expected)
 	if err != nil {
 		return nil, err
 	}

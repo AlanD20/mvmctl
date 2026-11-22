@@ -67,6 +67,7 @@ type floatingIPAuthority interface {
 		string,
 		string,
 		time.Duration,
+		*model.FloatingIPGrantIncarnation,
 	) (*model.FloatingIPDelegationItem, error)
 	ListFloatingIPs(context.Context, string) ([]*model.FloatingIPItem, error)
 }

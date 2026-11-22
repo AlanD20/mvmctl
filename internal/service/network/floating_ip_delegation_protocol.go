@@ -16,12 +16,13 @@ const (
 
 // FloatingIPDelegationGrantRequest selects one permission; root independently derives its incarnation.
 type FloatingIPDelegationGrantRequest struct {
-	ID            string        `json:"id"`
-	NetworkID     string        `json:"network_id"`
-	ResourceID    string        `json:"resource_id"`
-	VMID          string        `json:"vm_id"`
-	Method        string        `json:"method"`
-	LeaseDuration time.Duration `json:"lease_duration_ns"`
+	ID            string                            `json:"id"`
+	NetworkID     string                            `json:"network_id"`
+	ResourceID    string                            `json:"resource_id"`
+	VMID          string                            `json:"vm_id"`
+	Method        string                            `json:"method"`
+	LeaseDuration time.Duration                     `json:"lease_duration_ns"`
+	Expected      *model.FloatingIPGrantIncarnation `json:"expected_incarnation,omitempty"`
 }
 
 func (request FloatingIPDelegationGrantRequest) Validate() error {
@@ -30,6 +31,10 @@ func (request FloatingIPDelegationGrantRequest) Validate() error {
 		!vmIDPattern.MatchString(request.VMID) ||
 		!validFloatingIPDelegationMethod(floatingIPDelegationMethod(request.Method)) {
 		return networkAuthorityValidationError("delegation requires exact network, resource, VM and method")
+	}
+	if expected := request.Expected; expected != nil &&
+		(!bootIDPattern.MatchString(expected.BootID) || expected.LaunchGeneration == 0 || expected.ExecutionUID == 0) {
+		return networkAuthorityValidationError("expected delegation launch identity is invalid")
 	}
 	timed := request.Method == string(floatingIPDelegationAssociate) ||
 		request.Method == string(floatingIPDelegationRenew)
