@@ -192,10 +192,12 @@ def run(args):
                "[(root/p).chmod(0o644) for p in __import__('json').loads(sys.argv[2])]",
                guest_task + "/source", json.dumps(list(payload)))
     _write(task / "guest-task.json", dict(path=guest_task))
-    # Root sees only reviewed source bytes sent through its existing SSH channel.
-    # Its helper read is checked against this same source binding before execution.
+    # Root sees only reviewed observer/helper bytes sent through its existing SSH
+    # channel, both verified against the same outside-controller source binding.
     observer_raw = (ROOT / OBSERVER).read_bytes()
     assert hashlib.sha256(observer_raw).hexdigest() == payload[OBSERVER]
+    helper_raw = (ROOT / HELPER).read_bytes()
+    assert len(helper_raw) <= 65536 and hashlib.sha256(helper_raw).hexdigest() == payload[HELPER]
     observer = None
     prepared = False
     proof = None
@@ -210,7 +212,7 @@ def run(args):
         state = o._host_reboot_json(raw.encode())
         _write(task / "prepared.json", state)
         expected = dict(namespace=namespace, vm=state["vm"], candidate_sha256=args.candidate_sha256,
-                        helper_path=guest_task + "/source/" + HELPER, helper_sha256=payload[HELPER])
+                        helper_base64=base64.b64encode(helper_raw).decode("ascii"), helper_sha256=payload[HELPER])
         code = "import base64;exec(compile(base64.b64decode(" + repr(base64.b64encode(observer_raw).decode()) + "),'<pinned-vmm-exit-observer>','exec'))"
         remote = shlex.join(["/usr/bin/python3", "-I", "-S", "-B", "-c", code, json.dumps(expected)])
         command = ["ssh", "-F", "/dev/null", "-i", args.ssh_key, "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",

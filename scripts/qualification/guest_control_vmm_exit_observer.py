@@ -6,6 +6,7 @@ to sudoers. No signals, authority locks, lifecycle commands or record writes.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -14,6 +15,15 @@ import select
 import stat
 import sys
 import time
+
+
+def _helper_bytes(encoded, digest):
+    """Decode only the bounded, source-pinned existing worker observer helper."""
+    assert type(encoded) is str and len(encoded) <= 4 * ((65536 + 2) // 3)
+    raw = base64.b64decode(encoded, validate=True)
+    assert len(raw) <= 65536, "worker observer helper exceeds bound"
+    assert hashlib.sha256(raw).hexdigest() == digest, "worker observer helper hash differs"
+    return raw
 
 
 def _regular(path, *, owner, mode, limit=16384, retain_identity=False):
@@ -100,15 +110,16 @@ def _wait_exits(handles, timeout, *, poll_factory=select.poll, clock=time.monoto
 
 def observe(expected):
     assert os.getuid() == os.geteuid() == 0
+    assert set(expected) == {"namespace", "vm", "candidate_sha256", "helper_base64", "helper_sha256"}
     namespace, vm = expected["namespace"], expected["vm"]
     boot = lambda: Path("/proc/sys/kernel/random/boot_id").read_text().strip()
     assert os.uname().nodename == namespace["runner"] == "mvmctl-030-test"
     assert boot() == namespace["expected_vm"]["boot_id"]
-    # Execute only already reviewed helper bytes, verified before compilation.
-    raw = _regular(expected["helper_path"], owner=namespace["operator"]["uid"], mode=0o644, limit=65536)
-    assert hashlib.sha256(raw).hexdigest() == expected["helper_sha256"]
+    # The outside controller supplies this fixed helper from its reviewed source
+    # binding. No operator-controlled guest path supplies privileged code.
+    raw = _helper_bytes(expected["helper_base64"], expected["helper_sha256"])
     helper = {"__name__": "qualification_readonly_helpers"}
-    exec(compile(raw, expected["helper_path"], "exec"), helper)
+    exec(compile(raw, "tests/system/network/floating_ip_worker_fault.py", "exec"), helper)
     uid, gid = namespace["operator"]["uid"], namespace["operator"]["gid"]
     vm_id = vm["binding"]["id"]
     assert len(vm_id) == 32 and all(c in "0123456789abcdef" for c in vm_id)
@@ -153,6 +164,20 @@ def observe(expected):
 
 if __name__ == "__main__":
     observe(json.loads(sys.argv[1]))
+
+
+def test_helper_bytes_require_exact_hash_and_size_without_execution():
+    import pytest
+    raw = b"raise RuntimeError('this helper must never execute in the pure check')\n"
+    encoded = base64.b64encode(raw).decode("ascii")
+    digest = hashlib.sha256(raw).hexdigest()
+    assert _helper_bytes(encoded, digest) == raw
+    with pytest.raises(AssertionError, match="hash differs"):
+        _helper_bytes(base64.b64encode(raw + b"# tampered").decode("ascii"), digest)
+    with pytest.raises(AssertionError):
+        _helper_bytes(base64.b64encode(b"x" * 65537).decode("ascii"), digest)
+    with pytest.raises(ValueError):
+        _helper_bytes("!invalid base64!", digest)
 
 
 def test_vmm_binding_refuses_reused_pid():
