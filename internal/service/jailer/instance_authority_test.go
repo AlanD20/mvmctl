@@ -1265,3 +1265,22 @@ func writeTestAuthorityRecord(t *testing.T, root string, record instanceRecord) 
 	require.NoError(t, uidDirs.Release(context.Background()))
 	require.NoError(t, roots.Release(context.Background()))
 }
+
+func TestInitialVMLabelsCannotBeReplayedOnCleanedInstance(t *testing.T) {
+	ctx := t.Context()
+	authority, _ := newTestInstanceAuthority(t)
+	intent := testLaunchIntent(false)
+	intent.coldLabels = true
+	caller := testInstanceCaller()
+
+	first := prepareTestRelease(t, authority)
+	lease, err := first.registerLaunching(ctx, caller, intent, newTestBlockedLaunchProcesses(t, false))
+	require.NoError(t, err)
+	releaseTestLaunch(t, lease)
+
+	retry := prepareTestRelease(t, authority)
+	defer func() { require.NoError(t, retry.Release(context.WithoutCancel(ctx))) }()
+	lease, err = retry.registerLaunching(ctx, caller, intent, newTestBlockedLaunchProcesses(t, false))
+	require.ErrorContains(t, err, "initial labels require a new VM identity")
+	require.Nil(t, lease)
+}

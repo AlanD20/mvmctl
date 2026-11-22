@@ -27,6 +27,7 @@ const (
 // VMLaunchRequest selects canonical resources and typed guest intent. CacheRoot is only a
 // locator; no effect may use it after the receiver pins the managed cache authority.
 type VMLaunchRequest struct {
+	InitialLabels    model.VMLabels           `json:"initial_labels,omitempty"`
 	VMID             string                   `json:"vm_id"`
 	CacheRoot        string                   `json:"cache_root"`
 	KernelID         string                   `json:"kernel_id"`
@@ -155,6 +156,9 @@ type VMCleanupResult struct {
 
 // Validate enforces receiver resource selection and guest intent without any effect.
 func (request VMLaunchRequest) Validate() error {
+	if err := request.InitialLabels.Validate(); err != nil {
+		return err
+	}
 	switch request.NetworkPlacement {
 	case model.VMNetworkPlacementManaged, model.VMNetworkPlacementNetworkless:
 	default:

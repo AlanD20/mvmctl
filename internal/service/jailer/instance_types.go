@@ -69,6 +69,7 @@ type instanceLaunchRelay struct {
 }
 
 type launchIntent struct {
+	coldLabels        bool
 	vmID              string
 	networkPlacement  model.VMNetworkPlacement
 	hostBootID        string

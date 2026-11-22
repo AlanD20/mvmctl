@@ -367,10 +367,16 @@ binary:
 
 ### `vm`
 
-Create a virtual machine.
+Create a virtual machine. Set initial labels with `labels: {cluster: demo, role: worker}`.
+The `mvm vm create` equivalent is `--label cluster=demo --label role=worker`.
+A VM can have up to 32 labels. Label keys and values are lowercase and contain 1–63 ASCII
+letters, digits, dots, underscores, or hyphens. Keys and values must start and end with a letter or digit.
+For an existing VM, use `mvm vm labels inspect` to read the revision, then
+`mvm vm labels set <vm> --revision <revision> key=value` to replace its labels.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
+| `labels` | `map[string]string` | No | Empty | Initial VM labels, committed before first launch exposes the VM. |
 | `network` | `string` | No | Default network | Network step reference. |
 | `key` | `string` | No | Default key | SSH key step reference (shorthand for `ssh_keys`). |
 | `ssh_keys` | `[]string` | No | Default keys | `@key:name` references or existing SSH key names/IDs. |

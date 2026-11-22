@@ -70,9 +70,10 @@ func (s *FirecrackerSpawner) lifecycleRequest() (jailersvc.VMLaunchRequest, erro
 		return jailersvc.VMLaunchRequest{}, err
 	}
 	request := jailersvc.VMLaunchRequest{
-		VMID:      s.vmID(),
-		CacheRoot: s.config.CacheRoot,
-		KernelID:  s.config.KernelID,
+		InitialLabels: s.config.InitialLabels,
+		VMID:          s.vmID(),
+		CacheRoot:     s.config.CacheRoot,
+		KernelID:      s.config.KernelID,
 		RootfsBytes: uint64(
 			rootfs.Size(),
 		),

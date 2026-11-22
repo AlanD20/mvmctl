@@ -1522,6 +1522,7 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		}
 	}
 	fcConfig := &model.FirecrackerConfig{
+		InitialLabels:       c.resolved.Labels,
 		NetworkPlacement:    c.resolved.NetworkPlacement,
 		CacheRoot:           c.cacheRoot,
 		KernelID:            c.resolved.Kernel.ID,

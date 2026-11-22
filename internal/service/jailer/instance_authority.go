@@ -315,6 +315,9 @@ func (prepared *preparedRelease) registerLaunching(
 		existing = &record
 	}
 	if existing != nil {
+		if intent.coldLabels {
+			return nil, instanceValidationError("initial labels require a new VM identity")
+		}
 		if err := authorizeInstanceRecord(caller, *existing); err != nil {
 			return nil, err
 		}

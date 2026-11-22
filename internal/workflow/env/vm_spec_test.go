@@ -77,3 +77,24 @@ func TestVMDependencies(t *testing.T) {
 		})
 	}
 }
+
+func TestVMFromSpecAcceptsLabelsOnlyForCreation(t *testing.T) {
+	spec := model.ResourceMap{
+		"labels": map[string]string{"cluster": "demo", "role": "worker"},
+	}
+	if err := validateStepInput("vm", "test-vm", spec); err != nil {
+		t.Fatalf("valid initial labels: %v", err)
+	}
+	step, err := Registry["vm"].FromSpec("vm", "test-vm", spec, &api.Operation{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if labels := step.(*VMStep).input.Labels; labels["role"] != "worker" || labels["cluster"] != "demo" {
+		t.Fatalf("labels did not survive env decoding: %v", labels)
+	}
+
+	spec["existing"] = "test-vm"
+	if err := validateStepInput("vm", "test-vm", spec); err == nil {
+		t.Fatal("existing VM selection accepted creation labels")
+	}
+}

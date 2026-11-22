@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/config"
@@ -28,6 +29,7 @@ import (
 
 // VMCreateInput specifies v m create input.
 type VMCreateInput struct {
+	Labels model.VMLabels `json:"labels,omitempty" yaml:"labels,omitempty"`
 	// Required fields (no defaults)
 	Name    string   `json:"name"               yaml:"name"`
 	SSHKeys []string `json:"ssh_keys,omitempty" yaml:"ssh_keys,omitempty"`
@@ -71,6 +73,7 @@ type VMCreateInput struct {
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
 type ResolvedVMCreateInput struct {
+	Labels              model.VMLabels
 	Name                string
 	VMID                string
 	VMDir               string
@@ -335,6 +338,9 @@ func parseVMMemory(value string) (int, error) {
 
 // Validate rejects conflicting raw create choices without resolving dependencies.
 func (input VMCreateInput) Validate() error {
+	if err := input.Labels.Validate(); err != nil {
+		return err
+	}
 	if input.NocloudNetPort != nil {
 		return errs.New(errs.CodeValidationFailed,
 			"custom NoCloud ports are unsupported; omit nocloud_net_port to use reserved gateway TCP 8000")
@@ -621,6 +627,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	}
 	// Build the resolved result
 	result := &ResolvedVMCreateInput{
+		Labels:                maps.Clone(input.Labels),
 		Name:                  input.Name,
 		VMID:                  r.vmID,
 		VMDir:                 r.vmDir,

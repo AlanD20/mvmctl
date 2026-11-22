@@ -172,6 +172,7 @@ func (server *VMLifecycleServer) launch(
 		}
 	}
 	intent := launchIntent{
+		coldLabels:       len(request.InitialLabels) != 0,
 		vmID:             request.VMID,
 		networkPlacement: request.NetworkPlacement,
 		hostBootID:       bootID,
@@ -235,6 +236,12 @@ func (server *VMLifecycleServer) launch(
 	}
 	if console != nil {
 		if err := console.prepare(ctx, launching); err != nil {
+			return VMLaunchResult{}, err
+		}
+	}
+	if intent.coldLabels {
+		// The retained launch lease owns the new VM identity before topology can expose it.
+		if _, err := firewall.UpdateVMLabels(ctx, caller.uid, request.VMID, 0, request.InitialLabels); err != nil {
 			return VMLaunchResult{}, err
 		}
 	}

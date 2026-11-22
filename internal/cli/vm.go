@@ -147,6 +147,7 @@ func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonO
 
 func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	var (
+		initialLabels   []string
 		image           string
 		kernel          string
 		vcpu            int
@@ -187,6 +188,14 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			var labels model.VMLabels
+			if len(initialLabels) != 0 {
+				var err error
+				labels, err = parseVMLabels(initialLabels)
+				if err != nil {
+					return err
+				}
+			}
 
 			if skipCleanup && !force {
 				cleanupConfirmed, pErr := common.Cli.PromptConfirm(
@@ -231,6 +240,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			}
 
 			input := inputs.VMCreateInput{
+				Labels:      labels,
 				Name:        name,
 				SSHKeys:     sshKeyList,
 				BootArgs:    bootArgs,
@@ -336,6 +346,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.Flags().
 		StringVar(&image, "image", "", "Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file")
 	cmd.Flags().StringVar(&kernel, "kernel", "", "Kernel short ID or path to vmlinux file")
+	cmd.Flags().StringArrayVar(&initialLabels, "label", nil, "Initial VM label as key=value (repeatable)")
 	cmd.Flags().IntVar(&vcpu, "vcpu", 0, "Number of vCPUs (default: from user config)")
 	cmd.Flags().StringVar(&mem, "mem", "", "Memory in MiB or GiB (e.g. 512M, 1G, 4096). Default: from user config")
 	cmd.Flags().
