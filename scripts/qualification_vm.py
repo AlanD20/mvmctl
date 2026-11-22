@@ -582,6 +582,17 @@ vm=item['data']['vm'];assert vm['id']==request['vm_id'] and vm['status']=='runni
     probe = dict(namespace=namespace,namespace_identity=descriptor["before"]["guest"]["namespace_identity"])
     _command(o,namespace,script,json.dumps(probe),json.dumps(request))
 
+
+def _admin_ssh_command(namespace, key, known_hosts, payload):
+    expected = namespace["expected_vm"]["ssh_host_key"].split()
+    entries = [line.split() for line in known_hosts.read_text().splitlines() if line.strip() and not line.startswith('#')]
+    if not any(len(row)>=3 and namespace["expected_vm"]["ipv4"] in row[0].split(',') and row[1:3]==expected for row in entries):
+        raise RuntimeError("administrator SSH host key differs from retained exact target")
+    return ["ssh","-F","/dev/null","-i",str(key),"-o","BatchMode=yes","-o","StrictHostKeyChecking=yes",
+               "-o","UserKnownHostsFile="+str(known_hosts),"-o","ConnectTimeout=8",
+               "root@"+namespace["expected_vm"]["ipv4"],
+               shlex.join(["/usr/bin/python3","-I","-S","-B","-c",payload])]
+
 def administrator_main(argv=None):
     parser = argparse.ArgumentParser(description="Explicit one-shot QA root-worker STOP/CONT administrator")
     parser.add_argument("operation",choices=["admin-worker-stall"])
@@ -602,15 +613,7 @@ def administrator_main(argv=None):
     _observe_admin_stall_target(o,descriptor,request)
     raw = (o._REPO_ROOT / _ADMIN_HELPER).read_bytes()
     if hashlib.sha256(raw).hexdigest() != request["source_sha256"]:raise RuntimeError("administrator observer source changed")
-    namespace = descriptor["namespace"]
-    expected = namespace["expected_vm"]["ssh_host_key"].split()
-    entries = [line.split() for line in args.known_hosts.read_text().splitlines() if line.strip() and not line.startswith('#')]
-    if not any(len(row)==3 and namespace["expected_vm"]["ipv4"] in row[0].split(',') and row[1:]==expected for row in entries):
-        raise RuntimeError("administrator SSH host key differs from retained exact target")
-    command = ["ssh","-F","/dev/null","-i",str(args.key),"-o","BatchMode=yes","-o","StrictHostKeyChecking=yes",
-               "-o","UserKnownHostsFile="+str(args.known_hosts),"-o","ConnectTimeout=8",
-               "root@"+namespace["expected_vm"]["ipv4"],
-               shlex.join(["/usr/bin/python3","-I","-S","-B","-c",_root_stall_payload(raw,request)])]
+    command = _admin_ssh_command(descriptor["namespace"],args.key,args.known_hosts,_root_stall_payload(raw,request))
     _write(evidence,"admin-worker-command.json",_encode(command),MAX_OUTPUT_BYTES)
     _drive_admin_observer(o,descriptor,request,command,evidence)
     return 0

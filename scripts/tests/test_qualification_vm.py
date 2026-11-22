@@ -555,3 +555,30 @@ def test_final_admin_proof_failure_cannot_emit_a_passing_matrix(execution,admin_
     candidate=json.loads((e.task/'binding.json').read_text())['candidate']
     with pytest.raises(RuntimeError,match='incomplete or failed'):
         __import__('system_test_evidence').verify_matrix_task(e.task,e.source,candidate,e.registry)
+
+
+@pytest.mark.parametrize('comment',['',' root@mvmctl-030-test',' operator key comment with spaces'])
+def test_admin_ssh_command_accepts_matching_key_with_optional_comment(orchestrator,namespace,tmp_path,comment):
+    known=tmp_path/'known-hosts';key=tmp_path/'outside-private-key'
+    known.write_text(namespace['expected_vm']['ipv4']+' '+namespace['expected_vm']['ssh_host_key']+comment+'\n')
+    original=known.read_bytes()
+    payload='pinned observer payload'
+    command=orchestrator.qualification_vm._admin_ssh_command(namespace,key,known,payload)
+    assert command[:5]==['ssh','-F','/dev/null','-i',str(key)]
+    assert 'StrictHostKeyChecking=yes' in command and 'UserKnownHostsFile='+str(known) in command
+    assert command[-2]=='root@'+namespace['expected_vm']['ipv4']
+    assert shlex.split(command[-1])==['/usr/bin/python3','-I','-S','-B','-c',payload]
+    assert known.read_bytes()==original and not key.exists()
+
+
+@pytest.mark.parametrize('fault',['host','type','key'])
+def test_admin_ssh_command_comment_does_not_weaken_exact_pin(orchestrator,namespace,tmp_path,fault):
+    host=namespace['expected_vm']['ipv4'];kind,value=namespace['expected_vm']['ssh_host_key'].split()
+    if fault=='host':host='10.25.0.99'
+    elif fault=='type':kind='ssh-rsa'
+    else:value=value[:-1]+('A' if value[-1]!='A' else 'B')
+    known=tmp_path/'known-hosts';known.write_text(host+' '+kind+' '+value+' root@mvmctl-030-test\n')
+    original=known.read_bytes()
+    with pytest.raises(RuntimeError,match='differs from retained exact target'):
+        orchestrator.qualification_vm._admin_ssh_command(namespace,tmp_path/'outside-private-key',known,'pinned observer')
+    assert known.read_bytes()==original
