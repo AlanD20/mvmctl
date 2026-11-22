@@ -19,6 +19,9 @@ import (
 
 // TrafficPolicyState binds a closed traffic grant to its creation claim and root incarnation.
 type TrafficPolicyState struct {
+	SourceLabels      model.VMLabelSelector `yaml:"source_labels,omitempty"`
+	DestinationLabels model.VMLabelSelector `yaml:"destination_labels,omitempty"`
+
 	PolicyID                string `yaml:"policy_id"`
 	ClaimID                 string `yaml:"claim_id"`
 	Incarnation             string `yaml:"incarnation"`
@@ -33,6 +36,9 @@ type TrafficPolicyState struct {
 }
 
 type trafficPolicyDeclaration struct {
+	SourceLabels      model.VMLabelSelector `yaml:"source_labels"`
+	DestinationLabels model.VMLabelSelector `yaml:"destination_labels"`
+
 	SourceNetwork         string `yaml:"source_network"`
 	SourceVM              string `yaml:"source_vm"`
 	DestinationVM         string `yaml:"destination_vm"`
@@ -95,7 +101,10 @@ func (s *TrafficPolicyStep) Apply(ctx context.Context, state *workflow.SharedSta
 	}
 	var receipt *results.EnvironmentPolicyReceipt
 	var applyErr error
-	if output.DestinationFloatingIPID != "" {
+	if output.usesLabels() {
+		receipt, applyErr = s.op.LabelTrafficPolicyEnsure(ctx, output.labelInput(),
+			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
+	} else if output.DestinationFloatingIPID != "" {
 		receipt, applyErr = s.ensureFloatingIPPolicy(ctx, output)
 	} else if output.DestinationHost && output.SourceNetworkID != "" {
 		receipt, applyErr = s.op.NetworkToHostTrafficPolicyEnsure(ctx, output.networkHostInput(),
@@ -131,12 +140,13 @@ func (s *TrafficPolicyStep) resolveEndpoints(
 ) (*TrafficPolicyState, error) {
 	output := &TrafficPolicyState{
 		DestinationHost: s.input.DestinationHost, Protocol: s.input.Protocol, Port: s.input.Port,
+		SourceLabels: s.input.SourceLabels, DestinationLabels: s.input.DestinationLabels,
 	}
 	if s.input.DestinationFloatingIP != "" {
 		if err := s.resolveFloatingIPDestination(ctx, state, output); err != nil {
 			return nil, err
 		}
-	} else if !s.input.DestinationHost {
+	} else if !s.input.DestinationHost && s.input.DestinationLabels == nil {
 		destination, err := resourceStepReference(state, s.input.DestinationVM, "vm")
 		if err != nil {
 			return nil, err
@@ -166,7 +176,7 @@ func (s *TrafficPolicyStep) resolveEndpoints(
 			return nil, resourceIdentityMismatch(s.Name())
 		}
 		output.SourceNetworkID = network.ID
-	} else {
+	} else if s.input.SourceLabels == nil {
 		source, err := resourceStepReference(state, s.input.SourceVM, "vm")
 		if err != nil {
 			return nil, err
@@ -187,6 +197,9 @@ func (s *TrafficPolicyStep) resolveEndpoints(
 }
 
 func (s *TrafficPolicyStep) inspectExisting(ctx context.Context, output *TrafficPolicyState) error {
+	if output.usesLabels() {
+		return s.inspectExistingLabelPolicy(ctx, output)
+	}
 	// Port admission is identical for VM and host destinations; this parses no endpoint identity.
 	input := inputs.VMToHostTrafficPolicyCreateInput{
 		SourceVM: "source", Protocol: output.Protocol, DestinationPort: output.Port,
@@ -250,7 +263,10 @@ func (s *TrafficPolicyStep) Destroy(ctx context.Context, saved model.ResourceSta
 		return s.persist(ctx, write)
 	}
 	var err error
-	if output.DestinationFloatingIPID != "" {
+	if output.usesLabels() {
+		err = s.op.LabelTrafficPolicyRemoveOwned(ctx, output.labelInput(),
+			inputs.EnvironmentPolicyOwnershipInput{ClaimID: output.ClaimID, Incarnation: output.Incarnation})
+	} else if output.DestinationFloatingIPID != "" {
 		err = s.removeOwnedFloatingIPPolicy(ctx, output)
 	} else if output.DestinationHost && output.SourceNetworkID != "" {
 		err = s.op.NetworkToHostTrafficPolicyRemoveOwned(ctx, output.networkHostInput(),
@@ -283,11 +299,18 @@ func newTrafficPolicyStepFromSpec(stepType, name string, spec model.ResourceMap,
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
 	}
-	if (input.SourceNetwork == "") == (input.SourceVM == "") {
-		return nil, errs.New(
-			errs.CodeValidationFailed,
-			"traffic policy requires exactly one source_network or source_vm",
-		)
+	sources := 0
+	if input.SourceNetwork != "" {
+		sources++
+	}
+	if input.SourceVM != "" {
+		sources++
+	}
+	if input.SourceLabels != nil {
+		sources++
+	}
+	if sources != 1 {
+		return nil, errs.New(errs.CodeValidationFailed, "traffic policy requires exactly one source")
 	}
 	destinations := 0
 	if input.DestinationHost {
@@ -299,9 +322,11 @@ func newTrafficPolicyStepFromSpec(stepType, name string, spec model.ResourceMap,
 	if input.DestinationFloatingIP != "" {
 		destinations++
 	}
+	if input.DestinationLabels != nil {
+		destinations++
+	}
 	if destinations != 1 {
-		return nil, errs.New(errs.CodeValidationFailed,
-			"traffic policy requires exactly one destination_vm, destination_host: true or destination_floating_ip")
+		return nil, errs.New(errs.CodeValidationFailed, "traffic policy requires exactly one destination")
 	}
 	if (input.DestinationFloatingIP != "") != (input.DestinationNetwork != "") {
 		return nil, errs.New(
@@ -309,7 +334,17 @@ func newTrafficPolicyStepFromSpec(stepType, name string, spec model.ResourceMap,
 			"destination_network is required only with destination_floating_ip",
 		)
 	}
-	if input.DestinationFloatingIP != "" {
+	if input.SourceLabels != nil || input.DestinationLabels != nil {
+		if input.SourceNetwork != "" || input.DestinationHost || input.DestinationFloatingIP != "" {
+			return nil, errs.New(errs.CodeValidationFailed, "label traffic endpoints must select VMs")
+		}
+		validation := inputs.LabelTrafficPolicyCreateInput{
+			Source:      inputs.VMPolicySelectorInput{VM: input.SourceVM, Labels: input.SourceLabels},
+			Destination: inputs.VMPolicySelectorInput{VM: input.DestinationVM, Labels: input.DestinationLabels},
+			Protocol:    input.Protocol, DestinationPort: input.Port,
+		}
+		_, _, _, err = validation.ResolveTraffic()
+	} else if input.DestinationFloatingIP != "" {
 		err = validateFloatingIPTrafficDeclaration(input)
 	} else if input.DestinationHost && input.SourceNetwork != "" {
 		validation := inputs.NetworkToHostTrafficPolicyCreateInput{SourceNetwork: input.SourceNetwork,

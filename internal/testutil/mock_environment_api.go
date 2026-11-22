@@ -21,6 +21,11 @@ func (m *MockReadyAPI) ExecReady(ctx context.Context, input inputs.ReadyInput) (
 
 // MockEnvironmentPolicyAPI supplies explicit ownership outcomes for workflow tests.
 type MockEnvironmentPolicyAPI struct {
+	LabelTrafficPolicyEnsureFunc func(context.Context, inputs.LabelTrafficPolicyCreateInput,
+		inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
+	LabelTrafficPolicyRemoveOwnedFunc func(context.Context, inputs.LabelTrafficPolicyCreateInput,
+		inputs.EnvironmentPolicyOwnershipInput) error
+
 	VMToHostTrafficPolicyEnsureFunc           func(context.Context, inputs.VMToHostTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
 	VMToHostTrafficPolicyRemoveOwnedFunc      func(context.Context, inputs.VMToHostTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) error
 	NetworkToHostTrafficPolicyEnsureFunc      func(context.Context, inputs.NetworkToHostTrafficPolicyCreateInput, inputs.EnvironmentPolicyOwnershipInput) (*results.EnvironmentPolicyReceipt, error)
@@ -97,4 +102,22 @@ func (m *MockEnvironmentPolicyAPI) ExecPolicyRemoveOwned(
 		return fmt.Errorf("unexpected owned policy removal")
 	}
 	return m.ExecPolicyRemoveOwnedFunc(ctx, input, ownership)
+}
+
+func (m *MockEnvironmentPolicyAPI) LabelTrafficPolicyEnsure(
+	ctx context.Context, input inputs.LabelTrafficPolicyCreateInput, ownership inputs.EnvironmentPolicyOwnershipInput,
+) (*results.EnvironmentPolicyReceipt, error) {
+	if m.LabelTrafficPolicyEnsureFunc != nil {
+		return m.LabelTrafficPolicyEnsureFunc(ctx, input, ownership)
+	}
+	return nil, nil
+}
+
+func (m *MockEnvironmentPolicyAPI) LabelTrafficPolicyRemoveOwned(
+	ctx context.Context, input inputs.LabelTrafficPolicyCreateInput, ownership inputs.EnvironmentPolicyOwnershipInput,
+) error {
+	if m.LabelTrafficPolicyRemoveOwnedFunc != nil {
+		return m.LabelTrafficPolicyRemoveOwnedFunc(ctx, input, ownership)
+	}
+	return nil
 }

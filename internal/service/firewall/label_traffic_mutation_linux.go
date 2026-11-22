@@ -31,7 +31,7 @@ func EnsureLabelTrafficPolicy(
 				continue
 			}
 			if existing.OwnerUID != ownerUID ||
-				(expected != "" && (existing.Incarnation != expected || existing.ClaimID != claim)) {
+				(expected != "" && existing.Incarnation != expected) {
 				return policyOwnershipConflict()
 			}
 			policy = existing
