@@ -236,9 +236,12 @@ floating_ip_grant:
 ```
 
 The workflow saves every grant ID before creation. Each VM's first receipt pins the launch for that VM's other
-methods. If apply stops partway through, retry uses the saved IDs, and destroy revokes only grants from that
-batch. Delegation creates permission to call a method. The guest must still call it to acquire or renew an address.
+methods. After an interrupted apply, retry uses the saved IDs. Destroy recovers missing receipts from root using
+those IDs and keeps the saved plan until cleanup succeeds. Delegation gives the guest permission to call a method.
+The guest must still call it to acquire or renew an address.
 
+If you applied an environment with the earlier development build's `vm`, `method`, and `lease` fields, destroy
+it with that build before switching to the batch format.
 
 ### `key`
 

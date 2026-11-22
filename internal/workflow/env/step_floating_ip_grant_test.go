@@ -3,12 +3,14 @@ package env
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/internal/testutil"
@@ -27,70 +29,94 @@ func floatingIPGrantTestAPI() *testutil.MockOperation {
 	return op
 }
 
-func TestFloatingIPGrantUnknownOutcomeCanBeRevokedAfterVMStops(t *testing.T) {
-	// Destruction must recover exact grant authority without a live VM or a new delegation.
+func TestFloatingIPGrantDestroyRetainsBatchAfterRecoveredGrantRevokeFails(t *testing.T) {
 	op := floatingIPGrantTestAPI()
-	var saved model.ResourceState
-	write := func(_ context.Context, value model.ResourceState) error { saved = value; return nil }
-	var grant *model.FloatingIPDelegationItem
+	const spec = `version: "1"
+floating_ip_grant:
+  controller:
+    network: cluster
+    resource: api
+    vms: [controller]
+    methods:
+      - method: inspect
+      - method: release
+`
+	path := filepath.Join(t.TempDir(), "env.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(spec), 0600))
+	ctx := t.Context()
+	grants := make(map[string]model.FloatingIPDelegationItem)
 	lost := errors.New("grant response lost")
-	op.FloatingIPDelegationEnsureFunc = func(_ context.Context, input inputs.FloatingIPDelegationEnsureInput) (*model.FloatingIPDelegationItem, error) {
-		require.Equal(
-			t,
-			input.ID,
-			StateFromMap[FloatingIPGrantState](saved.Output).Grants[0].GrantID,
-			"grant ID must precede effect",
-		)
-		grant = &model.FloatingIPDelegationItem{
+	op.FloatingIPDelegationEnsureFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationEnsureInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		grant := model.FloatingIPDelegationItem{
 			ID:               input.ID,
 			NetworkID:        input.Network,
 			ResourceID:       input.Resource,
 			VMID:             input.VM,
 			Method:           input.Method,
-			LeaseDuration:    10 * time.Second,
 			BootID:           "33333333-3333-4333-8333-333333333333",
 			LaunchGeneration: 9,
 			ExecutionUID:     42000,
 			Revision:         1,
 			State:            "active",
 		}
-		return nil, lost
+		grants[grant.ID] = grant
+		if grant.Method == "release" {
+			return nil, lost
+		}
+		return &grant, nil
 	}
-	spec := model.ResourceMap{
-		"network":  "cluster",
-		"resource": "api",
-		"vms":      []string{"controller"},
-		"methods":  []map[string]string{{"method": "associate", "lease": "10s"}},
-	}
-	step, err := newFloatingIPGrantStepFromSpec("floating_ip_grant", "controller-associate", spec, op)
+	require.ErrorIs(t, Apply(ctx, op, path, nil, nil), lost)
+	require.Len(t, grants, 2)
+	stateDir := infra.GetWorkflowsStateDirByID(ResolveWorkflowID(path))
+	before, err := workflow.ReadWorkflowState(stateDir)
 	require.NoError(t, err)
-	require.ErrorIs(t, step.Apply(t.Context(), workflow.NewSharedState(), model.ResourceState{}, write, nil), lost)
-	require.NotNil(t, grant)
+	require.Len(t, before.Resources, 1)
+	batch := StateFromMap[FloatingIPGrantState](before.Resources[0].State.Output)
+	require.NotNil(t, batch)
+	require.Len(t, batch.Grants, 2)
+	assert.Nil(t, batch.Grants[1].Receipt, "release committed without returning its receipt")
+
 	op.VMGetFunc = func(context.Context, inputs.VMInput) (*model.VMItem, error) {
-		t.Fatal("cleanup must not require a live VM")
-		return nil, nil
+		return nil, errors.New("VM stopped")
 	}
-	op.FloatingIPDelegationGetFunc = func(_ context.Context, input inputs.FloatingIPDelegationInput) (*model.FloatingIPDelegationItem, error) {
-		require.Equal(t, grant.ID, input.ID)
-		return grant, nil
+	op.FloatingIPDelegationGetFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		grant, ok := grants[input.ID]
+		if !ok || grant.NetworkID != input.Network {
+			return nil, errs.NotFound(errs.CodeNetworkNotFound, "grant absent")
+		}
+		return &grant, nil
 	}
-	revoked := false
-	op.FloatingIPDelegationRemoveOwnedFunc = func(_ context.Context, input inputs.FloatingIPDelegationRemoveOwnedInput) (*model.FloatingIPDelegationItem, error) {
-		assert.Equal(t, *grant, input.Grant)
-		persisted := StateFromMap[FloatingIPGrantState](saved.Output)
-		require.NotNil(t, persisted.Grants[0].Receipt, "recovered root receipt must precede cleanup")
-		assert.Equal(t, uint64(9), persisted.Grants[0].Receipt.LaunchGeneration)
-		result := input.Grant
-		result.State, result.Revision = "revoked", 3
-		revoked = true
-		return &result, nil
+	revokeErr := errors.New("grant revocation interrupted")
+	op.FloatingIPDelegationRemoveOwnedFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationRemoveOwnedInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		assert.Equal(t, grants[input.Grant.ID], input.Grant)
+		assert.Equal(t, "release", input.Grant.Method, "cleanup encounters the recovered grant first")
+		return nil, revokeErr
 	}
-	restored, err := newFloatingIPGrantStepFromState("floating_ip_grant", "controller-associate", saved,
-		[]string{"vm:controller", "floating_ip:api"}, op)
+	require.ErrorIs(t, Destroy(ctx, op, path, nil), revokeErr)
+	after, err := workflow.ReadWorkflowState(stateDir)
 	require.NoError(t, err)
-	require.NoError(t, restored.Destroy(t.Context(), saved, write, nil))
-	assert.True(t, revoked)
-	assert.ElementsMatch(t, []string{"vm:controller", "floating_ip:api"}, restored.Dependencies())
+	testutil.AssertDiff(t, before.Resources, after.Resources)
+
+	op.FloatingIPDelegationRemoveOwnedFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationRemoveOwnedInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		grant := grants[input.Grant.ID]
+		assert.Equal(t, grant, input.Grant)
+		grant.State, grant.Revision = "revoked", 3
+		grants[grant.ID] = grant
+		return &grant, nil
+	}
+	require.NoError(t, Destroy(ctx, op, path, nil))
+	for id, grant := range grants {
+		assert.Equal(t, "revoked", grant.State, "grant %s", id)
+	}
+	assert.NoDirExists(t, stateDir)
 }
 
 func TestFloatingIPGrantReapplyRefusesChangedIncarnation(t *testing.T) {

@@ -54,7 +54,6 @@ the saved boot, launch generation and execution UID under retained root admissio
 This keeps several methods in one workflow step without creating group authority. A retry uses the original
 IDs, and teardown recovers or revokes only those grants.
 
-
 ### Ownership and fencing
 
 The Jailer admission lease retains the owned VM lock and verifies its current boot, launch generation,

@@ -18,8 +18,8 @@ See [Guest Control authority](../../../docs/adr/0027-guest-control-authority.md)
 | k8s-api | floating-IP resource, network `k8s` | 10.10.0.100 |
 
 Each controller has exactly four grants for the immutable `k8s-api` resource: inspect, associate, renew and release.
-Association and renewal each specify a **10s** lease in `k8s-controller.yaml`. To change the example lease, change all
-six association/renewal values together before initial apply. This is an explicit example setting, not a product default.
+Association and renewal each specify a **10s** lease in `k8s-controller.yaml`. To change the lease for all three
+controllers, update both method entries before the first apply.
 The one-second loop uses authenticated `kubectl --server=https://PRIMARY:6443 get --raw=/readyz` with the controller's
 admin kubeconfig. It never uses the VIP to decide whether the local API is healthy. Missing kubeconfig during bootstrap
 means unhealthy; the service starts before `kubeadm init` and claims only when the local API becomes ready.

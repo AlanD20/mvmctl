@@ -236,16 +236,14 @@ func (s *FloatingIPGrantStep) Destroy(ctx context.Context, saved model.ResourceS
 		return resourceIdentityMismatch(s.Name())
 	}
 	for i := len(output.Grants) - 1; i >= 0; i-- {
-		if err := s.revokeGrant(ctx, write, output, &output.Grants[i]); err != nil {
+		if err := s.revokeGrant(ctx, &output.Grants[i]); err != nil {
 			return err
 		}
 	}
 	return s.persist(ctx, write)
 }
 
-func (s *FloatingIPGrantStep) revokeGrant(
-	ctx context.Context, write workflow.StateWriter, batch *FloatingIPGrantState, output *floatingIPGrantState,
-) error {
+func (s *FloatingIPGrantStep) revokeGrant(ctx context.Context, output *floatingIPGrantState) error {
 	receipt := output.Receipt
 	if receipt == nil {
 		// A committed grant may have lost its response. Recover its exact root identity without requiring a live VM.
@@ -262,11 +260,8 @@ func (s *FloatingIPGrantStep) revokeGrant(
 		if !output.matches(item) {
 			return resourceIdentityMismatch(s.Name())
 		}
+		// The destroy writer removes the whole batch from state. Keep the saved ID until every revoke succeeds.
 		receipt = item
-		output.Receipt = item
-		if err := s.persistGrants(ctx, write, batch); err != nil {
-			return err
-		}
 	}
 	if !output.matches(receipt) {
 		return resourceIdentityMismatch(s.Name())
@@ -303,9 +298,16 @@ func newFloatingIPGrantStepFromSpec(stepType, name string, spec model.ResourceMa
 	if len(input.VMs) == 0 || len(input.Methods) == 0 {
 		return nil, errs.New(errs.CodeValidationFailed, "floating IP grant requires nonempty vms and methods lists")
 	}
+	grantInput := inputs.FloatingIPDelegationGrantInput{
+		Network: input.Network, Resource: input.Resource, Method: input.Methods[0].Method, Lease: input.Methods[0].Lease,
+	}
 	vms := make(map[string]bool, len(input.VMs))
 	for _, vm := range input.VMs {
-		if strings.TrimSpace(vm) == "" || vms[vm] {
+		grantInput.VM = vm
+		if err := grantInput.Validate(); err != nil {
+			return nil, err
+		}
+		if vms[vm] {
 			return nil, errs.New(errs.CodeValidationFailed, "floating IP grant requires distinct VM selectors")
 		}
 		vms[vm] = true
@@ -316,8 +318,8 @@ func newFloatingIPGrantStepFromSpec(stepType, name string, spec model.ResourceMa
 			return nil, errs.New(errs.CodeValidationFailed, "floating IP grant requires distinct methods")
 		}
 		methods[method.Method] = true
-		if err := (inputs.FloatingIPDelegationGrantInput{Network: input.Network, Resource: input.Resource,
-			VM: input.VMs[0], Method: method.Method, Lease: method.Lease}).Validate(); err != nil {
+		grantInput.Method, grantInput.Lease = method.Method, method.Lease
+		if _, err := grantInput.LeaseDuration(); err != nil {
 			return nil, err
 		}
 	}

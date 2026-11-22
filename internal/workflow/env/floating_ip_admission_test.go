@@ -20,6 +20,14 @@ func TestFloatingIPDeclarationsRejectInvalidAuthorityBeforeEffects(t *testing.T)
 		"missing dependency":            "network:\n  cluster:\n    subnet: 172.27.0.0/24\nfloating_ip:\n  api:\n    network: '@network:cluster'\n",
 		"ambiguous traffic destination": "traffic_policy:\n  service:\n    source_vm: client\n    destination_vm: controller\n    destination_floating_ip: api\n    destination_network: cluster\n    protocol: tcp\n    port: 6443\n",
 		"missing destination network":   "traffic_policy:\n  service:\n    source_vm: client\n    destination_floating_ip: api\n    protocol: tcp\n    port: 6443\n",
+		"invalid second VM selector": `floating_ip_grant:
+  grant:
+    network: cluster
+    resource: api
+    vms: [controller, " controller-2"]
+    methods:
+      - method: inspect
+`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "spec.yaml")
