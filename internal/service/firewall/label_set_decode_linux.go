@@ -57,7 +57,7 @@ func decodeManagedSetHeader(
 	if identity == managedTableIdentities[0] && name == secondaryLeaseSetName {
 		return managedSetRef{table: identity, name: name}, seq, attrs, nil
 	}
-	if !strings.HasPrefix(name, labelAddressSetPrefix) || validateGenerationID(name[len(labelAddressSetPrefix):]) != nil {
+	if !validLabelAddressSetName(name) {
 		return managedSetRef{}, 0, nil, invalidKernelObservation("managed table contains an unknown set")
 	}
 	return managedSetRef{table: identity, name: name}, seq, attrs, nil

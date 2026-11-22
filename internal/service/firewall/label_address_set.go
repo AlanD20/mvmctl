@@ -3,6 +3,7 @@ package firewall
 import (
 	"bytes"
 	"slices"
+	"strings"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
@@ -39,6 +40,11 @@ func labelAddressSetName(keys [][4]byte) string {
 		data = append(data, key[:]...)
 	}
 	return labelAddressSetPrefix + crypto.SHA256(data)
+}
+
+func validLabelAddressSetName(name string) bool {
+	return strings.HasPrefix(name, labelAddressSetPrefix) &&
+		validateGenerationID(name[len(labelAddressSetPrefix):]) == nil
 }
 
 func compareLabelAddress(left, right [4]byte) int {

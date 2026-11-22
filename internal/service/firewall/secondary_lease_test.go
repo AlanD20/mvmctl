@@ -70,7 +70,7 @@ func TestSecondaryLeaseLookupAcceptsOnlyTheClosedInvertedGuard(t *testing.T) {
 		"missing inversion": valid[:2],
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := decodeSecondaryLeaseLookup(mustMarshalKernelAttributes(t, attrs))
+			_, err := decodeManagedSetLookup(mustMarshalKernelAttributes(t, attrs))
 			require.Error(t, err)
 		})
 	}

@@ -593,7 +593,7 @@ func decodeKernelExpression(name string, raw []byte, family nftables.TableFamily
 	case "immediate":
 		return decodeKernelVerdict(raw)
 	case "lookup":
-		return decodeSecondaryLeaseLookup(raw)
+		return decodeManagedSetLookup(raw)
 	default:
 		return nil, invalidKernelObservation(fmt.Sprintf("unknown expression %q for family %d", name, family))
 	}
@@ -699,8 +699,9 @@ func decodeKernelComparison(raw []byte) (expr.Any, error) {
 
 func decodeKernelConntrack(raw []byte) (expr.Any, error) {
 	attrs, err := decodeUniqueKernelAttributes(raw, "conntrack expression", map[uint16]kernelAttributeRule{
-		unix.NFTA_CT_DREG: {required: true},
-		unix.NFTA_CT_KEY:  {required: true},
+		unix.NFTA_CT_DREG:      {required: true},
+		unix.NFTA_CT_KEY:       {required: true},
+		unix.NFTA_CT_DIRECTION: {},
 	})
 	if err != nil {
 		return nil, err
@@ -712,6 +713,20 @@ func decodeKernelConntrack(raw []byte) (expr.Any, error) {
 	key, err := kernelAttributeUint32(attrs[unix.NFTA_CT_KEY], "conntrack key")
 	if err != nil {
 		return nil, err
+	}
+	direction, directional := attrs[unix.NFTA_CT_DIRECTION]
+	switch expr.CtKey(key) {
+	case expr.CtKeySTATE, expr.CtKeyDIRECTION, expr.CtKeyPROTOCOL:
+		if directional {
+			return nil, invalidKernelObservation("unexpected direction on conntrack key")
+		}
+	case expr.CtKeyPROTODST:
+		// The kernel emits a single byte. Only the original connection tuple is used.
+		if !directional || !bytes.Equal(direction.Data, []byte{0}) {
+			return nil, invalidKernelObservation("conntrack tuple must use the original direction")
+		}
+	default:
+		return nil, invalidKernelObservation("conntrack key is outside the closed rule grammar")
 	}
 	return &expr.Ct{Register: register, Key: expr.CtKey(key)}, nil
 }

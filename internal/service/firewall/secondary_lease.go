@@ -78,10 +78,10 @@ func secondaryLeaseMiss(interfaceKey expr.MetaKey, addressOffset uint32) []expr.
 	}
 }
 
-func decodeSecondaryLeaseLookup(raw []byte) (expr.Any, error) {
-	attrs, err := decodeUniqueKernelAttributes(raw, "secondary lease lookup", map[uint16]kernelAttributeRule{
+func decodeManagedSetLookup(raw []byte) (expr.Any, error) {
+	attrs, err := decodeUniqueKernelAttributes(raw, "managed set lookup", map[uint16]kernelAttributeRule{
 		unix.NFTA_LOOKUP_SET: {required: true}, unix.NFTA_LOOKUP_SREG: {required: true},
-		unix.NFTA_LOOKUP_FLAGS: {required: true},
+		unix.NFTA_LOOKUP_FLAGS: {},
 	})
 	if err != nil {
 		return nil, err
@@ -94,12 +94,19 @@ func decodeSecondaryLeaseLookup(raw []byte) (expr.Any, error) {
 	if err != nil {
 		return nil, err
 	}
-	flags, err := kernelAttributeUint32(attrs[unix.NFTA_LOOKUP_FLAGS], "secondary lease lookup flags")
-	if err != nil {
-		return nil, err
+	var flags uint32
+	if attr, found := attrs[unix.NFTA_LOOKUP_FLAGS]; found {
+		flags, err = kernelAttributeUint32(attr, "managed set lookup flags")
+		if err != nil {
+			return nil, err
+		}
 	}
-	if name != secondaryLeaseSetName || register != 1 || flags != unix.NFT_LOOKUP_F_INV {
-		return nil, invalidKernelObservation("secondary lease lookup differs from closed guard")
+	switch {
+	case register == 1 && name == secondaryLeaseSetName && flags == unix.NFT_LOOKUP_F_INV:
+		return &expr.Lookup{SourceRegister: 1, SetName: name, Invert: true}, nil
+	case register == 1 && validLabelAddressSetName(name) && flags == 0:
+		return &expr.Lookup{SourceRegister: 1, SetName: name}, nil
+	default:
+		return nil, invalidKernelObservation("managed set lookup differs from closed rule")
 	}
-	return &expr.Lookup{SourceRegister: register, SetName: name, Invert: true}, nil
 }

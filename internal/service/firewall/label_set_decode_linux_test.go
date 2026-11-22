@@ -3,6 +3,7 @@ package firewall
 import (
 	"testing"
 
+	"github.com/google/nftables/expr"
 	"github.com/mdlayher/netlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,4 +88,32 @@ func staticLabelElementReply(t *testing.T, ref managedSetRef, keys ...[4]byte) n
 		{Type: unix.NFTA_SET_ELEM_LIST_SET, Data: []byte(ref.name + "\x00")},
 		{Type: unix.NFTA_SET_ELEM_LIST_ELEMENTS, Data: mustMarshalKernelAttributes(t, elements)},
 	})
+}
+
+func TestDecodeOriginalTupleAndPositiveLabelLookup(t *testing.T) {
+	name := labelAddressSetName([][4]byte{{10, 0, 0, 2}})
+	lookupAttrs := []netlink.Attribute{
+		{Type: unix.NFTA_LOOKUP_SET, Data: []byte(name + "\x00")},
+		{Type: unix.NFTA_LOOKUP_SREG, Data: testBigEndianUint32(1)},
+	}
+	lookup, err := decodeManagedSetLookup(mustMarshalKernelAttributes(t, lookupAttrs))
+	require.NoError(t, err)
+	assert.Equal(t, &expr.Lookup{SourceRegister: 1, SetName: name}, lookup)
+	lookupAttrs = append(lookupAttrs, netlink.Attribute{
+		Type: unix.NFTA_LOOKUP_FLAGS, Data: testBigEndianUint32(unix.NFT_LOOKUP_F_INV),
+	})
+	_, err = decodeManagedSetLookup(mustMarshalKernelAttributes(t, lookupAttrs))
+	require.Error(t, err)
+
+	tupleAttrs := []netlink.Attribute{
+		{Type: unix.NFTA_CT_DREG, Data: testBigEndianUint32(1)},
+		{Type: unix.NFTA_CT_KEY, Data: testBigEndianUint32(uint32(expr.CtKeyPROTODST))},
+		{Type: unix.NFTA_CT_DIRECTION, Data: []byte{0}},
+	}
+	decoded, err := decodeKernelConntrack(mustMarshalKernelAttributes(t, tupleAttrs))
+	require.NoError(t, err)
+	assert.Equal(t, &expr.Ct{Register: 1, Key: expr.CtKeyPROTODST}, decoded)
+	tupleAttrs[2].Data = []byte{1}
+	_, err = decodeKernelConntrack(mustMarshalKernelAttributes(t, tupleAttrs))
+	require.Error(t, err)
 }
