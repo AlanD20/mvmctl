@@ -183,6 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Wait for an initially unavailable Guest Control connection within the existing startup deadline. Authentication,
+  malformed replies and changed VM authority still fail immediately; waiting does not replay guest operations.
 - Fixed stale peer MAC addresses after floating-IP ownership moves. The guest agent announces verified alias
   installation before acknowledging it; policy and old-owner fencing remain enforced independently.
 - Fixed rejection of valid family-filtered conntrack dump replies, which prevented floating-IP retirement on
