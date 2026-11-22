@@ -243,7 +243,7 @@ Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/
 
 The final schema includes `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`,
 `host_state`, `host_state_changes`, `network_traffic_policies`, `vm_traffic_policies`, `network_host_traffic_policies`,
-`vm_host_traffic_policies`, `exec_policies`, `ssh_keys`,
+`vm_host_traffic_policies`, `ssh_keys`,
 `user_settings`, `vm_vsock_config`, `snapshots`, and `db_migrations`. The published fresh-install migration,
 `internal/lib/db/migrations/001_baseline_0_3.sql`, establishes the baseline at SQLite `user_version=1`.
 The single baseline includes both host-grant projection tables; no second migration is shipped for them.
@@ -840,12 +840,11 @@ composes the bounded source/destination relay behind `mvm exec --allow-vm-exec` 
 It requires root-admitted active VM identities, so transitional launches cannot become eligible through SQLite status
 or a policy row. Ordinary host-to-VM execution and all copy directions retain their existing path.
 
-Directional exact-user exec-policy intent is now public through
-`mvm policy exec create <source-vm> <destination-vm> <target-user>`, `mvm policy exec ls [--json]`, and
-`mvm policy exec rm <policy...> [--force]`. Creation resolves the source and destination through the VM domain, rejects
-the same VM and the root target user, and derives a deterministic identity from the exact source VM ID, destination VM
-ID, and target user. It performs no network lookup: the grant is directional and independent of same-network,
-cross-network, or absent IP-network placement. List and removal operate only on the exec-policy family.
+Exec policy endpoints can be exact VMs or live label selectors. The grant remains directional, uses one non-root
+target account, and applies independently of network placement. Root stores committed grants and materializes
+membership per owner when labels or policies change. Final relay admission authenticates the VM pair and socket
+peers, then queries the exact source, destination, and target user in the current root index. Pending publication
+denies new admissions. A command already admitted can finish when membership changes.
 
 The protocol-only `internal/lib/vmexecwire` foundation is implemented. It uses fixed `MVMEXEC1` magic, version 1, a
 big-endian length, and at most 64 KiB per frame. Strict closed schemas distinguish a guest-source request from the exact

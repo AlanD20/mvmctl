@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added VM labels and live selectors for traffic and VM-to-VM exec policies, including environment specs.
+  Label changes apply to established traffic and to new exec admissions. Exec policies are stored and
+  enforced by root. The HA example uses selectors to express the same grants across its six VMs.
+  See the [policy reference](docs/REFERENCES.md#mvm-policy).
 - Added managed floating IPv4 reservations with host association, transfer and release. Host assignments persist
   until release, transfer or VM stop; explicitly delegated guest operations use finite, kernel-enforced leases.
   Guest Control authenticates each VM and grants exact methods, never arbitrary host commands.

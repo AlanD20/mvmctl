@@ -474,6 +474,8 @@ Allow TCP or UDP traffic to a destination VM, floating IP or the source network'
 |-------|------|-------------|
 | `source_network` | `string` | Source network selector or `@network:name`; mutually exclusive with `source_vm`. |
 | `source_vm` | `string` | Source VM selector or `@vm:name`; mutually exclusive with `source_network`. |
+| `source_labels` | `map` | Require all listed labels on the source VM. |
+| `destination_labels` | `map` | Require all listed labels on the destination VM. |
 | `destination_vm` | `string` | Destination VM selector or `@vm:name`; mutually exclusive with the other destination fields. |
 | `destination_host` | `bool` | Set `true` for the source managed network's host gateway, not the host's LAN address or localhost. |
 | `destination_floating_ip` | `string` | Floating-IP selector or `@floating_ip:name`; mutually exclusive with VM/host destinations. Requires `destination_network`. |
@@ -482,7 +484,8 @@ Allow TCP or UDP traffic to a destination VM, floating IP or the source network'
 | `port` | `string` or `int` | Destination port or inclusive range, e.g. `5432` or `"8000-8080"`; bounds 1–65535. |
 | `existing` | `string` | Select an existing policy by exact ID, verified against the declared source, destination, protocol, and port/range. |
 
-Both creation and existing selection require exactly one source, a destination, protocol, and port/range. With `existing`, these fields must match the selected grant. Existing selection preserves the policy on destroy.
+Both creation and existing selection require exactly one source, one destination, protocol, and port/range.
+Label selectors pair with another label selector or an exact VM. With `existing`, these fields must match the selected grant. Existing selection preserves the policy on destroy.
 
 Operators may select any host port, but must explicitly declare its protocol and port/range. The host service must
 listen on the gateway or a suitable wildcard address. Host-to-VM access remains outside policy management.
@@ -540,6 +543,8 @@ Create a directional VM-to-VM execution grant for one non-root destination user.
 | Field | Type | Description |
 |-------|------|-------------|
 | `source_vm` | `string` | Source VM selector or `@vm:name`. |
+| `source_labels` | `map` | Require all listed labels on the source VM. |
+| `destination_labels` | `map` | Require all listed labels on the destination VM. |
 | `destination_vm` | `string` | Destination VM selector or `@vm:name`. |
 | `target_user` | `string` | Required non-root guest user for creation or existing selection. |
 | `existing` | `string` | Select an existing policy by exact ID, verified against the declared endpoints and target user. |
@@ -547,10 +552,10 @@ Create a directional VM-to-VM execution grant for one non-root destination user.
 ```yaml
 exec_policy:
   app-maintenance:
-    source_vm: "@vm:app"
+    source_labels: {role: app}
     destination_vm: "@vm:database"
     target_user: app
-    depends_on: ["@vm:app", "@vm:database"]
+    depends_on: ["@vm:database"]
 ```
 
 ### `ready`

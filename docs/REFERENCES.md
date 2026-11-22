@@ -614,15 +614,32 @@ Policy management separates TCP/UDP traffic intent from directional VM-to-VM exe
 | `mvm policy traffic ls` | `--json` | List VM, host-gateway and floating-IP grants with current resource names |
 | `mvm policy traffic inspect` | `POLICY_ID`, exactly one of `--from-network` or `--from-vm`, optional `--to-host` or `--to-floating-ip`, `--json` | Inspect intent; add `--to-host` for a host-gateway grant |
 | `mvm policy traffic rm` | `POLICY_IDS...`, exactly one of `--from-network` or `--from-vm`, optional `--to-host` or `--to-floating-ip`, `-f, --force` | Revoke the root grant or prove its absence before deleting the local projection |
-| `mvm policy exec create` | `SOURCE_VM DESTINATION_VM TARGET_USER` | Persist one directional execution grant for an exact non-root destination user |
+| `mvm policy traffic labels create` | `--from-vm VM` or repeated `--from-label KEY=VALUE`; `--to-vm VM` or repeated `--to-label KEY=VALUE`; `--protocol`, `--port` | Allow TCP or UDP using current VM labels |
+| `mvm policy traffic labels ls` | `--json` | List selector traffic policies |
+| `mvm policy traffic labels rm` | `POLICY_IDS...`, `-f, --force` | Remove selector traffic policies |
+| `mvm policy exec create` | `SOURCE_VM DESTINATION_VM TARGET_USER` or endpoint flags with `--user USER` | Allow directional execution as one non-root user |
 | `mvm policy exec ls` | `--json` | List directional execution policies with current VM names |
 | `mvm policy exec rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more execution policies by exact ID or unambiguous prefix |
 
-Traffic creation applies the grant through root before updating SQLite; removal requires root revocation or exact
+Exact traffic creation applies the grant through root before updating SQLite; removal requires root revocation or exact
 absence first. List and inspect show the local projection. Root success followed by a projection failure is reported
 for repair/retry and does not undo the root outcome. Policies may bind exact active or cleaned root endpoints. Stopping
 a VM preserves endpoint reservations and grants for restart; removing it invalidates them. A grant to a stopped
 endpoint does not create a live network interface.
+
+Labels are exact `key=value` matches. Repeat a label flag to require all values. Use at least one label selector for
+`policy traffic labels create`. Exec accepts exact VMs, selectors, or one of each. Only VMs owned by the policy's
+operator can match.
+
+```bash
+mvm policy traffic labels create --from-label role=worker --to-label role=controller --protocol tcp --port 6443
+mvm policy exec create --from-label role=worker --to-vm controller-1 --user worker-reader
+```
+
+Set initial labels with repeated `mvm vm create --label KEY=VALUE` flags or the VM's `labels` workflow field.
+Use `mvm vm labels inspect VM` for the current revision and `mvm vm labels set VM --revision N KEY=VALUE` to replace the label map.
+Removing membership blocks existing VM traffic unless another policy still allows it. A remote command already
+admitted can finish. Each new command checks the current policy.
 
 Use `--to-host` to reach a host service through the source managed network's gateway. For a network with gateway
 `10.25.0.1`, the guest connects to that address, not the workstation's LAN address or `127.0.0.1`:

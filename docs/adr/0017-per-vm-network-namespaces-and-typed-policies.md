@@ -528,13 +528,12 @@ A traffic policy applies to the IP data plane only. It grants neither vsock exec
 
 #### Exec policies
 
-An exec policy grants one exact source VM permission to request command execution on one exact destination VM through
-the host vsock relay. It is directional, independent of network membership, and required for both same-network and
-cross-network VMs.
+An exec policy grants one source VM or label selector permission to request command execution on one destination VM or
+label selector through the host vsock relay. It is directional and applies independently of network membership.
 
 Exec policies require a non-root destination user. v0.3.0 does not provide VM-to-VM root execution or VM-to-host
-execution. The relay authenticates the source from the active host-side vsock session and root-owned instance identity,
-then enforces the exact source, destination, owner, and target user before contacting the destination agent.
+execution. The relay authenticates both VM identities and socket peers. After the final peer proof, root checks the
+operator's current index for the exact source, destination, and target user before the API sends the command.
 
 The relay bounds request size, frame size, output bytes, duration, and concurrent executions. Audit records contain the
 source, destination, target user, timing, and result but not the complete command. An exec policy grants no TCP/UDP
@@ -689,8 +688,8 @@ identity, retained-process proof, and final liveness. The registered root compos
 rather than recreating any of those checks; the API listener/consumer that will call it remains pending.
 
 That future socket proof establishes the exact source Firecracker peer, not the selected guest port. The independent
-`SourceSession` token/bootstrap handshake remains the source agent-and-port proof. After directional policy approval,
-the API acquires only the authenticated destination Firecracker UDS connection through the fixed root broker, before
+`SourceSession` token/bootstrap handshake remains the source agent-and-port proof. The API acquires only
+the authenticated destination Firecracker UDS connection through the fixed root broker, before
 opening the retained pair session. This ordering is required because the retained pair holds both VM locks while the
 root broker needs the destination VM lock to admit a socket; attempting that broker operation afterward waits on a
 lock held by the pair. Raw socket acquisition sends no guest `CONNECT`, token, command, or request. After pair
@@ -702,7 +701,14 @@ second descriptor-transfer direction; the approved 0.3.0 design uses the narrowe
 After both expensive identity proofs, the implemented authority performs one bounded last-look sweep of both
 peer pidfds and both retained process sets before its final host-boot and relay-budget check. Only then does the API send
 the token-and-command-bearing `DestinationRequest`, which the destination agent must validate before any effect. Root
-receives no UDS path, agent token, target user, command, policy material, or response payload.
+receives the non-root target user and request ID in the retained session request. Agent tokens, commands, selector
+expressions, and command output stay with the API and guest agents.
+
+Label and exec policy mutations materialize exact membership under the host-global firewall lock. Traffic rules use
+static interface-and-IP sets and check current policy in each packet direction. An established flow cannot bypass
+these rules. A new exec admission reads a bounded per-owner source/user index and one destination bit. The policy
+lock is released before the command starts. Pending index publication denies new admissions for that owner until
+a logical mutation recovers the committed intent. An admitted command can finish after a label or policy change.
 
 The registered root child retains the pair/capacity lease and duplicates of both admitted connections for the entire
 relay. An explicit release, control EOF, API crash, setup failure, or the absolute `CLOCK_BOOTTIME` relay-stop deadline

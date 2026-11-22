@@ -51,15 +51,14 @@ mvm env apply build-base.yaml
 and explicit traffic/exec policies, resolves the floating resource ID using root-backed `mvm floating-ip inspect`, and
 passes the validated immutable ID through ordinary `mvm exec` to the fixed guest setup helper. Env command strings
 cannot interpolate resource outputs. All three lease services start before initialization. Joining controllers and
-workers use `mvm exec --allow-vm-exec` and `mvm-agent remote --user` with exact directional policies to controller-1.
+workers use `mvm exec --allow-vm-exec` and `mvm-agent remote --user` with directional policies to controller-1.
 Controller and worker join files have separate non-root reader groups, expire after two hours, and are never printed.
 Failed certificate upload aborts without publishing a fabricated certificate key. Root-only init/join logs contain secrets.
 
-`k8s-policy.yaml` declares network-to-floating-IP TCP 6443, directional controller-pair TCP 2379–2380,
-controller-to-node TCP 10250, and directional node-pair UDP 8472 and TCP 4240. These are service-specific grants;
-there is no blanket network allow. Host access to the VIP is still subject to the host's existing routing and firewall.
-`kubectl.sh` uses the VIP exclusively, so a successful command exercises that endpoint. `kubeconfig.sh` fetches credentials
-from any reachable controller through operator exec and writes a private local `.kubeconfig`.
+`k8s-policy.yaml` uses the `cluster`, `role`, and `joins` VM labels to group the six nodes. All nodes can exchange
+VXLAN and Cilium health traffic. Controllers can reach the kubelets and one another's etcd ports. The API uses the
+floating-IP grant on TCP 6443. Only the joining controllers and workers can use the relay to reach their respective
+reader accounts on `controller-1`.
 
 `destroy.sh` stops and disables each lease loop, attempts current-generation release, then destroys policy, worker and
 controller environments in reverse order. It stops on unreachable controllers or uncertain release rather than blindly

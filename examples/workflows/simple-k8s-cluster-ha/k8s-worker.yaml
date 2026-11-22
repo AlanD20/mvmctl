@@ -17,6 +17,7 @@ binary:
     version: 1.16.0
 vm:
   worker-1:
+    labels: {cluster: k8s-ha, role: worker}
     network: '@network:k8s'
     guest_ip: 10.10.0.20
     key: '@key:k8s-key'
@@ -33,6 +34,7 @@ vm:
     - '@kernel:full-kernel'
     - '@binary:fc-binary'
   worker-2:
+    labels: {cluster: k8s-ha, role: worker}
     network: '@network:k8s'
     guest_ip: 10.10.0.21
     key: '@key:k8s-key'
@@ -49,6 +51,7 @@ vm:
     - '@kernel:full-kernel'
     - '@binary:fc-binary'
   worker-3:
+    labels: {cluster: k8s-ha, role: worker}
     network: '@network:k8s'
     guest_ip: 10.10.0.22
     key: '@key:k8s-key'
