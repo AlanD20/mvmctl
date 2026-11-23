@@ -237,7 +237,7 @@ These 11 cases do not qualify Guest Control, packet ownership, automatic failove
 
 | Command/Flag | Status | Test File | Test Class(es) | Notes |
 |---|---|---|---|---|
-| `vm create` basic | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` (via module_vm), `TestVMCreate` | L2 — status=running. Many shallow VM tests. |
+| `vm create` basic | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMListInspect` (via listing_vm), `TestVMCreate` | L2 — status=running. Many shallow VM tests. |
 | `vm create` with `--vcpu` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_resource_allocation` | Installed-candidate L2 — guest nproc=2 plus create/inspect resource fields. |
 | `vm create` with `--vcpu 0` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_invalid_resource_rejected_before_vm_creation` | L2 — schema-1 class-1 `vm.create.failed`, unchanged VM inventory. |
 | `vm create` with `--vcpu -1` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions::test_invalid_resource_rejected_before_vm_creation` | L2 — typed validation refusal and unchanged VM inventory. |

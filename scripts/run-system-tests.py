@@ -1219,22 +1219,6 @@ def _volume_inspect_record(stdout: str, name: str) -> dict[str, object]:
     return info["volume"]
 
 
-def _inspect_volume_path(name: str) -> tuple[bool, str | None]:
-    """Return whether a volume record exists and its recorded backing path."""
-    result = mvm("volume", "inspect", name, "--json", check=False, timeout=30)
-    if result.returncode != 0:
-        return False, None
-    volume = _volume_inspect_record(result.stdout, name)
-    path = volume.get("path")
-    return True, path if isinstance(path, str) and path else None
-
-
-def _get_volume_path(name: str) -> str | None:
-    """Get the recorded on-disk path of a volume, or None if absent."""
-    _exists, path = _inspect_volume_path(name)
-    return path
-
-
 def _inspect_shared_volume() -> tuple[bool, str | None, str | None, bool]:
     """Inspect the mirror source or its authoritative protected backing."""
     result = mvm(
