@@ -36,23 +36,11 @@ var outputSession struct {
 	partial bool
 }
 
-// BeginOutput starts a display session before initialization, so startup and
-// argument errors use the same envelope. Arguments after -- belong to the guest.
-func BeginOutput(args []string) {
-	outputSession.enabled = false
+// BeginOutput initializes the response session using the command's parsed output mode.
+func BeginOutput(enabled bool) {
+	outputSession.enabled = enabled
 	outputSession.data = nil
 	outputSession.partial = false
-	for _, arg := range args {
-		if arg == "--" {
-			break
-		}
-		switch arg {
-		case "--json", "--json=true", "--json=1", "--json=t", "--json=T", "--json=TRUE", "--json=True":
-			outputSession.enabled = true
-		case "--json=false", "--json=0", "--json=f", "--json=F", "--json=FALSE", "--json=False":
-			outputSession.enabled = false
-		}
-	}
 }
 
 // StructuredOutput reports whether this invocation requested a JSON envelope.

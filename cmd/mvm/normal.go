@@ -13,7 +13,7 @@ import (
 )
 
 func runCLI() int {
-	common.BeginOutput(os.Args[1:])
+	common.BeginOutput(cli.RequestsStructuredOutput(os.Args[1:]))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

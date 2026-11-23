@@ -139,7 +139,7 @@ mvm logs myvm --os
 
 ```bash
 mvm bin ls --long
-mvm bin pull <version> --force
+mvm bin pull TYPE[:VERSION] --force
 ```
 
 **2. cgroup v2 or required controllers are unavailable.** VM launch requires the unified cgroup-v2 hierarchy with `cpu`, `memory`, and `pids`. Refresh host information and inspect the detected limits:

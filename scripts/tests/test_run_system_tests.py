@@ -2106,7 +2106,7 @@ def test_tier2_provision_registers_assets_and_requires_alpine_default(
         ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull --type firecracker --version v1.15 --default", 150),
         ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23 --default", 150),
         ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble", 360),
-        ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force", 150),
+        ("MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull firecracker:1.17.0 --default --force", 150),
         ("/usr/local/bin/mvm image ls --json", 30),
     ]
     if fault == "alpine-pull-failed":

@@ -40,7 +40,7 @@ Network removal requires live reservations to be removed first; reset admits onl
 
 The registered `floating-ip-create`, `floating-ip-list`, `floating-ip-get` and `floating-ip-remove` actions use
 the existing enrolled-operator dispatch, authenticated caller UID, zero-payload framing and EOF-before-effects
-contract. `mvm floating-ip` exposes reservation create/list/inspect/removal. Forced network cleanup retires its
+contract. `mvm network floating-ip` exposes reservation create/list/inspect/removal. Forced network cleanup retires its
 reservations first; ordinary pruning retains networks with floating resources. Automatic VM primary allocation
 excludes observed floating reservations, with final root admission still refusing concurrent conflicts.
 

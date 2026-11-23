@@ -75,8 +75,8 @@ func TestExecPolicyListJSONUsesArrayForNoPolicies(t *testing.T) {
 	cmd := cli.NewPolicyCmd(mock)
 	list, _, err := cmd.Find([]string{"exec", "ls"})
 	require.NoError(t, err)
-	common.BeginOutput([]string{"--json"})
-	t.Cleanup(func() { common.BeginOutput(nil) })
+	common.BeginOutput(true)
+	t.Cleanup(func() { common.BeginOutput(false) })
 	require.NoError(t, list.RunE(list, nil))
 	var output bytes.Buffer
 	require.NoError(t, common.FinishOutput(&output, nil))

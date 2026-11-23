@@ -22,8 +22,9 @@ import (
 // newRunCmd creates the "run" subcommand for service entry points.
 func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run",
-		Short: "Run internal services (subprocess entry points)",
+		Use:    "run",
+		Short:  "Run internal services (subprocess entry points)",
+		Hidden: true,
 	}
 
 	cmd.AddCommand(newNoCloudNetCmd())

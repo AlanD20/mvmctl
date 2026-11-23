@@ -89,7 +89,7 @@ def _require_firecracker_hotplug(runner_vm: str) -> None:
         pytest.fail(
             f"Hotplug tests require Firecracker v1.5+ "
             f"(current: v{version}). "
-            f"Install a newer binary with: mvm bin pull firecracker <version>"
+            f"Install a newer binary with: mvm bin pull firecracker:VERSION"
         )
 
 

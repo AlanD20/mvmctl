@@ -994,7 +994,7 @@ class _OwnedCachePrune:
                 self.runner_vm,
                 "bin",
                 "pull",
-                "1.17.0",
+                "firecracker:1.17.0",
                 "--json",
                 timeout=300,
             ).stdout,
@@ -2284,7 +2284,7 @@ class _OwnedCacheRelease:
         assert self.slot_absent(self.version), "Slot appeared before install; no removal authority"
         self.attempted = True
         pair = _json_success_data(
-            _run_mvm(self.case.runner_vm, "bin", "pull", self.version, "--json", timeout=300).stdout,
+            _run_mvm(self.case.runner_vm, "bin", "pull", f"firecracker:{self.version}", "--json", timeout=300).stdout,
             list,
         )
         assert len(pair) == 2 and {row["type"] for row in pair} == {"firecracker", "jailer"}, pair
@@ -2320,7 +2320,7 @@ class _OwnedCacheRelease:
             assert _cache_release_receipt(self.case, self.version) == self.receipt
             data = _json_success_data(
                 _run_mvm(
-                    self.case.runner_vm, "bin", "rm", self.version, "--force", "--json", timeout=120
+                    self.case.runner_vm, "bin", "rm", f"firecracker:{self.version}", "--force", "--json", timeout=120
                 ).stdout,
                 dict,
             )

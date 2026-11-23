@@ -136,7 +136,7 @@ mvm exec myvm                    # vsock agent — no SSH needed
 ```
 
 `--binary-version` is used by `mvm init` only when no local pair is selected. If a different pair is already the
-default, run `mvm bin pull 1.17.0 --default` before creating a VM. When you're done: `mvm vm rm myvm`.
+default, run `mvm bin pull firecracker:1.17.0 --default` before creating a VM. When you're done: `mvm vm rm myvm`.
 
 ---
 

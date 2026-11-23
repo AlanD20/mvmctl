@@ -27,8 +27,8 @@ func TestFinishOutputDistinguishesPartialResultFromFailedResult(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			common.BeginOutput([]string{"--json"})
-			t.Cleanup(func() { common.BeginOutput(nil) })
+			common.BeginOutput(true)
+			t.Cleanup(func() { common.BeginOutput(false) })
 			tc.record(struct {
 				VMIDs []string `json:"vm_ids"`
 			}{VMIDs: []string{"restored-vm"}})
@@ -71,8 +71,8 @@ func TestRecordListResultKeepsArrayShape(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			common.BeginOutput([]string{"--json"})
-			t.Cleanup(func() { common.BeginOutput(nil) })
+			common.BeginOutput(true)
+			t.Cleanup(func() { common.BeginOutput(false) })
 			require.True(t, common.RecordListResult(tc.items))
 			var output bytes.Buffer
 			require.NoError(t, common.FinishOutput(&output, nil))

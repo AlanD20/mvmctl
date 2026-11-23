@@ -20,7 +20,7 @@ not qualify every fault path, aarch64 runtime, remote CI or a different candidat
 - [mvm snapshot](#mvm-snapshot-alias-ss)
 - [mvm console](#mvm-console)
 - [mvm network](#mvm-network)
-- [mvm floating-ip](#mvm-floating-ip)
+- [mvm network floating-ip](#mvm-floating-ip)
 - [mvm policy](#mvm-policy)
 - [mvm key](#mvm-key)
 - [mvm config](#mvm-config)
@@ -115,7 +115,7 @@ mvm init [flags]
 | `--binary-version <version>` | Download this exact Firecracker version when no local pair exists | empty (interactive choice or latest in non-interactive mode) |
 
 `--binary-version` does not replace an existing default pair. To select the v0.3.0 launch pair when another release is
-already installed, run `mvm bin pull 1.17.0 --default` and check `mvm bin ls` before creating a VM.
+already installed, run `mvm bin pull firecracker:1.17.0 --default` and check `mvm bin ls` before creating a VM.
 
 ---
 
@@ -358,19 +358,25 @@ The binary resolver tries selectors in priority order:
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm bin ls` | `-r, --remote`, `--limit`, `--json`, `--long` | List local (and optionally remote) Firecracker versions |
-| `mvm bin pull` | `<version>`, `--default, -d`, `--force, -f` | Install one root-authoritative release |
+| `mvm bin pull` | `TYPE[:VERSION]`, `--default, -d`, `--force, -f` | Install one root-authoritative release |
 | `mvm bin default` | `SELECTOR` | Set a binary as the active default |
-| `mvm bin rm` | `<exact-version>...`, `-f, --force` | Remove exact releases; force hides local advisories only |
+| `mvm bin rm` | `TYPE:EXACT_VERSION...`, `-f, --force` | Remove exact releases; force hides local advisories only |
 
 ```
 # List local and remote versions
 mvm bin ls --remote
 
+# Select the latest stable release of this type
+mvm bin pull firecracker
+
+# Select the newest stable patch in a release series
+mvm bin pull firecracker:1.17
+
 # Install and select the required VM launch pair
-mvm bin pull 1.17.0 --default
+mvm bin pull firecracker:1.17.0 --default
 
 # Remove the exact architecture-scoped release pair
-mvm bin rm 1.15.0
+mvm bin rm firecracker:1.15.0
 ```
 
 ---
@@ -573,7 +579,7 @@ host-service grants and no longer uses the legacy tracker.
 
 ---
 
-### `mvm floating-ip`
+### `mvm network floating-ip`
 
 Reserve private IPv4 addresses and administer exact guest permissions. See the
 [Guest Control guide](GUEST_CONTROL.md) for ownership, fencing, guest commands and service access.
@@ -584,17 +590,17 @@ complete lowercase 32-character grant ID.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm floating-ip create NAME` | `--ip IPV4` | Reserve the explicit address, or allocate an available address when omitted |
-| `mvm floating-ip ls` | `--long`, `--json` | List reservations; `list` is an alias |
-| `mvm floating-ip inspect SELECTOR` | `--json` | Inspect fresh root ownership, lifetime, phase and packet authority; guest alias readiness is unobserved |
-| `mvm floating-ip associate SELECTOR VM` | `--generation N`, `--json` | Persist ownership until release, transfer or VM stop; requires an unassociated resource |
-| `mvm floating-ip transfer SELECTOR VM` | `--generation N`, `--json` | Fence the current owner and assign the target VM |
-| `mvm floating-ip release SELECTOR` | `--generation N`, `--json` | Fence and release ownership; alias: `disassociate` |
-| `mvm floating-ip rm SELECTOR` | `--force, -f` | Remove a reservation; force skips confirmation only |
-| `mvm floating-ip delegation grant RESOURCE` | `--vm VM`, `--method METHOD`, `--lease DURATION` | Store one permission for the current VM incarnation |
-| `mvm floating-ip delegation ls RESOURCE` | `--long`, `--json` | List grants, including revoked lifetimes |
-| `mvm floating-ip delegation inspect GRANT_ID` | `--json` | Inspect one exact grant |
-| `mvm floating-ip delegation revoke GRANT_ID` | — | Revoke and fence ownership sustained by that grant |
+| `mvm network floating-ip create NAME` | `--ip IPV4` | Reserve the explicit address, or allocate an available address when omitted |
+| `mvm network floating-ip ls` | `--long`, `--json` | List reservations; `list` is an alias |
+| `mvm network floating-ip inspect SELECTOR` | `--json` | Inspect fresh root ownership, lifetime, phase and packet authority; guest alias readiness is unobserved |
+| `mvm network floating-ip associate SELECTOR VM` | `--generation N`, `--json` | Persist ownership until release, transfer or VM stop; requires an unassociated resource |
+| `mvm network floating-ip transfer SELECTOR VM` | `--generation N`, `--json` | Fence the current owner and assign the target VM |
+| `mvm network floating-ip release SELECTOR` | `--generation N`, `--json` | Fence and release ownership; alias: `disassociate` |
+| `mvm network floating-ip rm SELECTOR` | `--force, -f` | Remove a reservation; force skips confirmation only |
+| `mvm network floating-ip delegation grant RESOURCE` | `--vm VM`, `--method METHOD`, `--lease DURATION` | Store one permission for the current VM incarnation |
+| `mvm network floating-ip delegation ls RESOURCE` | `--long`, `--json` | List grants, including revoked lifetimes |
+| `mvm network floating-ip delegation inspect GRANT_ID` | `--json` | Inspect one exact grant |
+| `mvm network floating-ip delegation revoke GRANT_ID` | — | Revoke and fence ownership sustained by that grant |
 
 `--vm` and `--method` are required for grant creation. Methods are `inspect`, `associate`, `renew` and `release`.
 Association and renewal require a positive whole-second duration, such as `10s`; inspect and release forbid it.

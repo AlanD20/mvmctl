@@ -22,8 +22,8 @@ import (
 // the CLI's error contract keeps data null. Successful selectors belong in
 // recovery details, not a success-shaped payload or an implied rollback.
 func TestVMCreateMixedFailureKeepsJSONDataNull(t *testing.T) {
-	common.BeginOutput([]string{"--json"})
-	t.Cleanup(func() { common.BeginOutput(nil) })
+	common.BeginOutput(true)
+	t.Cleanup(func() { common.BeginOutput(false) })
 	details := map[string]any{
 		"created_vm_ids": []string{"completed-id"},
 		"failed_vms":     []map[string]any{{"vm_id": "attempted-id", "name": "batch-2"}},

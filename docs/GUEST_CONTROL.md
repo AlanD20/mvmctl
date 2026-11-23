@@ -16,9 +16,9 @@ A stored grant alone does not establish a working Guest Control session.
 For an existing managed network named `cluster`, reserve an available address and inspect it:
 
 ```bash
-mvm floating-ip create api --network cluster
-mvm floating-ip inspect api --network cluster --json
-mvm floating-ip ls --network cluster --long
+mvm network floating-ip create api --network cluster
+mvm network floating-ip inspect api --network cluster --json
+mvm network floating-ip ls --network cluster --long
 ```
 
 Use `--ip 10.25.0.100` at creation to request that exact usable address when it belongs to the network's subnet.
@@ -32,9 +32,9 @@ For eligible running VMs `controller-1` and `controller-2` in `cluster`, associa
 explicitly transfer it, or release it:
 
 ```bash
-mvm floating-ip associate api controller-1 --network cluster
-mvm floating-ip transfer api controller-2 --network cluster
-mvm floating-ip release api --network cluster
+mvm network floating-ip associate api controller-1 --network cluster
+mvm network floating-ip transfer api controller-2 --network cluster
+mvm network floating-ip release api --network cluster
 ```
 
 Host assignments persist until explicit release, transfer or VM stop. They require neither a delegation nor a
@@ -43,7 +43,7 @@ transfer fences the old owner before admitting the new one. `release` also accep
 
 All three commands accept optional `--generation N` to bind a previous observation. When omitted, the command
 observes the root generation immediately before its compare-and-swap; a concurrent change can still conflict.
-Fresh `mvm floating-ip inspect api --network cluster --json` reports `phase`, `lifetime`, `owner_origin`,
+Fresh `mvm network floating-ip inspect api --network cluster --json` reports `phase`, `lifetime`, `owner_origin`,
 `owner_vm_id`, `authority_state`, `lease_remaining_ms` and `alias_synchronization` alongside identity/generation.
 A persistent lifetime with zero remaining lease is not expired. Interpret lifetime and current authority together.
 For current, stable ownership, inspection observes kernel authority. Unassociated, retired or prior-boot records
@@ -64,11 +64,11 @@ acknowledgment; a fresh authorized retry can finish it without extending a finit
 For an eligible running VM named `controller-1` in `cluster`, grant each required method separately:
 
 ```bash
-mvm floating-ip delegation grant api --network cluster --vm controller-1 --method inspect
-mvm floating-ip delegation grant api --network cluster --vm controller-1 --method associate --lease 10s
-mvm floating-ip delegation grant api --network cluster --vm controller-1 --method renew --lease 10s
-mvm floating-ip delegation grant api --network cluster --vm controller-1 --method release
-mvm floating-ip delegation ls api --network cluster --long
+mvm network floating-ip delegation grant api --network cluster --vm controller-1 --method inspect
+mvm network floating-ip delegation grant api --network cluster --vm controller-1 --method associate --lease 10s
+mvm network floating-ip delegation grant api --network cluster --vm controller-1 --method renew --lease 10s
+mvm network floating-ip delegation grant api --network cluster --vm controller-1 --method release
+mvm network floating-ip delegation ls api --network cluster --long
 ```
 
 `10s` is an example, not a default. Association and renewal grants require an explicit positive whole-second
@@ -142,7 +142,7 @@ Typed references resolve saved identities; command strings do not interpolate ou
 retries and teardown use the exact saved resource, grant and policy ownership, including after uncertain effects.
 
 Stop lease controllers and release ownership before removing their resources. Revoke obsolete grants, remove exact
-service policies, then remove the reservation with `mvm floating-ip rm api --network cluster`. `--force` skips its
+service policies, then remove the reservation with `mvm network floating-ip rm api --network cluster`. `--force` skips its
 confirmation, not ownership checks. Ordinary network removal requires floating reservations to be removed first.
 VM stop, deletion and restore fence secondary authority. Host reboot does not restore either kind of ownership.
 

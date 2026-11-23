@@ -3,11 +3,14 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/lib/model"
+	libversion "mvmctl/internal/lib/version"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 
 	"github.com/spf13/cobra"
 )
@@ -106,14 +109,21 @@ func newBinaryPullCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "pull <version>",
+		Use:               "pull TYPE[:VERSION]",
 		Short:             "Install a Firecracker release through the trusted root authority",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeInstalledBinaryReleaseVersions,
+		ValidArgsFunction: completeBinaryPullSelectors,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			typ, version := libversion.ParseSelector(args[0])
+			if typ == "" && !strings.Contains(args[0], ":") {
+				typ, version = args[0], "latest"
+			}
+			if typ != "firecracker" || version == "" {
+				return errs.New(errs.CodeBinaryPullFailed, "expected firecracker or firecracker:version")
+			}
 			binaries, err := binaryAPI.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
-				Version:          args[0],
-				Type:             "firecracker",
+				Version:          version,
+				Type:             typ,
 				SetDefault:       setDefault,
 				DownloadOverride: force,
 			}, nil)
@@ -141,19 +151,42 @@ func newBinaryPullCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	return cmd
 }
 
+func completeBinaryPullSelectors(
+	cmd *cobra.Command,
+	args []string,
+	prefix string,
+) ([]string, cobra.ShellCompDirective) {
+	if len(args) != 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	values, directive := completeInstalledBinaryReleaseVersions(cmd, args, prefix)
+	if strings.HasPrefix("firecracker", prefix) {
+		values = append([]string{"firecracker"}, values...)
+	}
+	return values, directive
+}
+
 func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm <exact-version>...",
+		Use:               "rm TYPE:EXACT_VERSION...",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more exact Firecracker release versions",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeInstalledBinaryReleaseVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			versions := make([]string, 0, len(args))
+			for _, selector := range args {
+				typ, version := libversion.ParseSelector(selector)
+				if typ != "firecracker" || version == "" {
+					return errs.New(errs.CodeValidationFailed, "binary removal requires firecracker:exact-version")
+				}
+				versions = append(versions, version)
+			}
 			batchResult := binaryAPI.BinaryRemove(
 				cmd.Context(),
-				inputs.BinaryRemoveInput{Versions: args},
+				inputs.BinaryRemoveInput{Versions: versions},
 				force,
 			)
 			if common.StructuredOutput() {

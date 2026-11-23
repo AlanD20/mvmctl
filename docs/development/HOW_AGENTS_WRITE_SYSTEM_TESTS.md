@@ -382,10 +382,10 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 |----------|---------|-----|
 | `bin ls --json` | L1 | DB query + JSON |
 | `bin ls --remote` / `--remote --limit` | **L2** | Real network I/O |
-| `bin pull <version>` | **L2** | Real HTTP download |
-| `bin pull <version> --force` / `--default` | **L2** | Root-authoritative release install and optional real download |
+| `bin pull TYPE[:VERSION]` | **L2** | Real HTTP download |
+| `bin pull TYPE[:VERSION] --force` / `--default` | **L2** | Root-authoritative release install and optional real download |
 | `bin pull` nonexistent | L1 | Error handling |
-| `bin rm <exact-version>...` | **L2** | Root-authoritative release removal |
+| `bin rm TYPE:EXACT_VERSION...` | **L2** | Root-authoritative release removal |
 | `bin rm` nonexistent | L1 | Error handling |
 | `bin default` / `bin default <nonexistent>` | L1 | DB update |
 | Trusted releases survive cache clean | **L2** | Root store is independent of the user cache |

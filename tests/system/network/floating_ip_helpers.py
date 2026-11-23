@@ -67,7 +67,7 @@ class FloatingIPJourney:
         intent = {"network": network, "name": label, "ipv4": address, "item": None}
         self.resources.append(intent)
         item = _tcp_data(
-            self.runner, "floating-ip", "create", label, "--network", network["id"],
+            self.runner, "network", "floating-ip", "create", label, "--network", network["id"],
             "--ip", address,
         )
         assert re.fullmatch(r"[0-9a-f]{32}", item["id"]), item
@@ -84,7 +84,7 @@ class FloatingIPJourney:
 
     def grant(self, vm, resource, method, *, lease_seconds=300):
         args = [
-            "floating-ip", "--network", resource["network_id"], "delegation", "grant",
+            "network", "floating-ip", "--network", resource["network_id"], "delegation", "grant",
             resource["id"], "--vm", vm["binding"]["id"], "--method", method,
         ]
         # This is an explicit test policy, not an operator default.
@@ -371,11 +371,11 @@ print('OWNED_STALE_ALIAS_REMOVED')
         for intent in reversed(self.resources):
             try:
                 network = intent["network"]
-                for item in _tcp_data(self.runner, "floating-ip", "ls", "--network", network["id"], kind=list):
+                for item in _tcp_data(self.runner, "network", "floating-ip", "ls", "--network", network["id"], kind=list):
                     if item["name"] == intent["name"]:
                         assert item["network_id"] == network["id"] and item["ipv4"] == intent["ipv4"]
                         assert intent["item"] is None or item["id"] == intent["item"]["id"]
-                        _run_mvm(self.runner, "floating-ip", "rm", item["id"], "--network",
+                        _run_mvm(self.runner, "network", "floating-ip", "rm", item["id"], "--network",
                                  network["id"], "--force")
             except Exception as exc:
                 errors.append(f"resource cleanup: {exc}")

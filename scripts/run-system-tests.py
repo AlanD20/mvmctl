@@ -1937,7 +1937,7 @@ def provision_t2(
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.17.0 --default --force",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull firecracker:1.17.0 --default --force",
         timeout=150,
     )
     # VM tests that omit --image require the fast Alpine runner prerequisite.

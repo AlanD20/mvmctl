@@ -323,8 +323,8 @@ mkdir -p "$MVM_ASSET_MIRROR"
 "$MVM_BINARY" image pull ubuntu-minimal:24.04 --force
 "$MVM_BINARY" image pull ubuntu --version 24.04 --force
 "$MVM_BINARY" kernel pull --type firecracker --version v1.15 --default
-"$MVM_BINARY" bin pull 1.16.0 --force
-"$MVM_BINARY" bin pull 1.17.0 --default --force
+"$MVM_BINARY" bin pull firecracker:1.16.0 --force
+"$MVM_BINARY" bin pull firecracker:1.17.0 --default --force
 ```
 
 These pulls populate the local mirror directory. On subsequent runs, each pull

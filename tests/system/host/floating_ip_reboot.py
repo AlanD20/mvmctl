@@ -60,7 +60,7 @@ def validate_pre(receipt, boot):
 
 
 def _host(journey, resource, method="inspect", vm=None, generation=None):
-    args = ["floating-ip", "--network", resource["network_id"], method, resource["id"]]
+    args = ["network", "floating-ip", "--network", resource["network_id"], method, resource["id"]]
     if vm is not None:
         args.append(vm["binding"]["id"])
     if generation is not None:
@@ -144,7 +144,7 @@ def prepare(runner, boot):
         operator_claim = _host(journey, persistent, "associate", owner, persistent["generation"])
         _assert_persistent(operator_claim, persistent, owner, boot)
         journey.alias(owner, persistent, present=True)
-        assert _tcp_data(runner, "floating-ip", "delegation", "ls", persistent["id"],
+        assert _tcp_data(runner, "network", "floating-ip", "delegation", "ls", persistent["id"],
                          "--network", network["id"], kind=list) == []
         operator_nonce = journey.flow(source, owner, log, persistent["ipv4"], allowed=True)
         policy = journey.policy(source, resource, "vm")
@@ -260,7 +260,7 @@ def resume(runner, receipt, boot):
         assert _run_mvm(runner, "exec", owner["binding"]["id"], "--user", "root", "--",
                         "cat /root/floating-reboot-marker").stdout == receipt["marker"]
         for grant in receipt["grants"]:
-            current = _tcp_data(runner, "floating-ip", "delegation", "inspect", grant["id"], "--network", resource["network_id"])
+            current = _tcp_data(runner, "network", "floating-ip", "delegation", "inspect", grant["id"], "--network", resource["network_id"])
             assert current["state"] == "revoked" and current["revision"] > grant["revision"]
             assert {key: value for key, value in current.items() if key not in ("state", "revision")} == {
                 key: value for key, value in grant.items() if key not in ("state", "revision")}
@@ -268,7 +268,7 @@ def resume(runner, receipt, boot):
         fenced = _host(journey, persistent)
         _assert_ownerless(fenced, persistent, inspection=True)
         assert fenced["generation"] > receipt["operator"]["associated"]["generation"]
-        assert _tcp_data(runner, "floating-ip", "delegation", "ls", persistent["id"],
+        assert _tcp_data(runner, "network", "floating-ip", "delegation", "ls", persistent["id"],
                          "--network", persistent["network_id"], kind=list) == []
         journey.alias(owner, persistent, present=False)
         journey.alias(owner, resource, present=False)

@@ -111,8 +111,8 @@ func TestNewBinaryListCmd(t *testing.T) {
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		listCmd, _, _ := cmd.Find([]string{"ls"})
-		common.BeginOutput([]string{"--json"})
-		t.Cleanup(func() { common.BeginOutput(nil) })
+		common.BeginOutput(true)
+		t.Cleanup(func() { common.BeginOutput(false) })
 		require.NoError(t, listCmd.RunE(listCmd, nil))
 		var output bytes.Buffer
 		require.NoError(t, common.FinishOutput(&output, nil))
@@ -242,7 +242,7 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
 		output := captureBinaryStdout(t, func() {
-			require.NoError(t, pullCmd.RunE(pullCmd, []string{"1.15.0"}))
+			require.NoError(t, pullCmd.RunE(pullCmd, []string{"firecracker:1.15.0"}))
 		})
 		assert.Contains(t, output, "Trusted release ready: firecracker v1.15.0")
 		assert.NotContains(t, output, "Installed:")
@@ -253,7 +253,7 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
 		assert.Nil(t, pullCmd.Flags().Lookup("git-ref"))
 		assert.Nil(t, pullCmd.Flags().Lookup("version"))
-		assert.Equal(t, "pull <version>", pullCmd.Use)
+		assert.Equal(t, "pull TYPE[:VERSION]", pullCmd.Use)
 		assert.NotContains(t, pullCmd.Short, "source")
 	})
 
@@ -280,7 +280,7 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		err := pullCmd.RunE(pullCmd, []string{"1.15.0"})
+		err := pullCmd.RunE(pullCmd, []string{"firecracker:1.15.0"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "network timeout")
 	})
@@ -297,7 +297,7 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
 		require.NoError(t, pullCmd.Flags().Set("force", "true"))
-		err := pullCmd.RunE(pullCmd, []string{"1.15.0"})
+		err := pullCmd.RunE(pullCmd, []string{"firecracker:1.15.0"})
 		assert.NoError(t, err)
 	})
 
@@ -313,7 +313,7 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
 		require.NoError(t, pullCmd.Flags().Set("default", "true"))
-		err := pullCmd.RunE(pullCmd, []string{"1.15.0"})
+		err := pullCmd.RunE(pullCmd, []string{"firecracker:1.15.0"})
 		assert.NoError(t, err)
 	})
 }
@@ -335,7 +335,7 @@ func TestNewBinaryRemoveCmdUsesPositionalExactVersions(t *testing.T) {
 		cmd := cli.NewBinaryCmd(mock, nil)
 		removeCmd, _, _ := cmd.Find([]string{"rm"})
 		require.NoError(t, removeCmd.Flags().Set("force", "true"))
-		require.NoError(t, removeCmd.RunE(removeCmd, []string{"1.16.1", "1.15.2"}))
+		require.NoError(t, removeCmd.RunE(removeCmd, []string{"firecracker:1.16.1", "firecracker:1.15.2"}))
 		assert.Equal(t, 1, calls)
 	})
 
@@ -343,7 +343,7 @@ func TestNewBinaryRemoveCmdUsesPositionalExactVersions(t *testing.T) {
 		cmd := cli.NewBinaryCmd(&testutil.MockBinaryAPI{}, nil)
 		removeCmd, _, _ := cmd.Find([]string{"rm"})
 		assert.Nil(t, removeCmd.Flags().Lookup("version"))
-		assert.Equal(t, "rm <exact-version>...", removeCmd.Use)
+		assert.Equal(t, "rm TYPE:EXACT_VERSION...", removeCmd.Use)
 		require.Error(t, removeCmd.Args(removeCmd, nil))
 	})
 }

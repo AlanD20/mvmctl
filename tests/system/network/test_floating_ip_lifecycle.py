@@ -37,7 +37,7 @@ def test_floating_allocation_refuses_stopped_primary(runner_vm, floating_network
     stopped = next(item for item in _data(runner_vm, "vm", "ls", kind=list) if item["name"] == floating_test_vm)
     assert stopped["status"] == "stopped"
     assert stopped["ipv4"] == _address(net, 10)
-    refused = _run_mvm(runner_vm, "floating-ip", "create", "conflict", "--network", net["name"],
+    refused = _run_mvm(runner_vm, "network", "floating-ip", "create", "conflict", "--network", net["name"],
                        "--ip", _address(net, 10), "--json", check=False)
     assert refused.returncode != 0
     assert _items(runner_vm, net) == []

@@ -979,7 +979,7 @@ class _JailerReleases:
                 self.runner_vm,
                 "bin",
                 "pull",
-                "1.16.0",
+                "firecracker:1.16.0",
                 "--json",
                 check=False,
                 timeout=300,
@@ -999,7 +999,7 @@ class _JailerReleases:
         assert self.ownership.require("source-verify") == self.baseline["source"]
         _require_bin_root_projection(self.resources.rows("bin"), self.baseline["source"])
         self.source_remove_attempted = True
-        result = _installed_mvm(self.runner_vm, "bin", "rm", "1.17.0", "--force", check=False)
+        result = _installed_mvm(self.runner_vm, "bin", "rm", "firecracker:1.17.0", "--force", check=False)
         observed = self.ownership.require("source-observe")
         assert result.returncode == 0 and observed == {"absent": True}, (
             result.stdout,
@@ -1031,7 +1031,7 @@ class _JailerReleases:
                         self.runner_vm,
                         "bin",
                         "pull",
-                        "1.17.0",
+                        "firecracker:1.17.0",
                         "--json",
                         check=False,
                         timeout=300,
@@ -1064,7 +1064,7 @@ class _JailerReleases:
                     self.older_receipt = observed
                     _require_bin_root_projection(rows, observed)
                     assert self.ownership.require("older-verify") == observed
-                    result = _installed_mvm(self.runner_vm, "bin", "rm", "1.16.0", "--force", check=False)
+                    result = _installed_mvm(self.runner_vm, "bin", "rm", "firecracker:1.16.0", "--force", check=False)
                     assert result.returncode == 0, (result.stdout, result.stderr)
                     assert self.ownership.require("older-removed") == {"absent": True}
                 else:

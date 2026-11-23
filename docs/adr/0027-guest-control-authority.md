@@ -83,7 +83,7 @@ moves through recorded revoking and revoked states; old IDs cannot reactivate. O
 exact sustaining grant revision, so revocation does not cancel operator ownership or a different grant's lease.
 Association and renewal grants require an explicit finite whole-second lease policy; inspect and release do not.
 Persistence, guest ownership effects and operator delegation CRUD are implemented and reviewed. The
-`mvm floating-ip delegation` commands store, list, inspect and revoke exact method grants. Revocation can
+`mvm network floating-ip delegation` commands store, list, inspect and revoke exact method grants. Revocation can
 finish after the target VM stops. Workflow ensure and owned removal use exact immutable grant identities;
 matching names or permission tuples never transfer ownership. Stored permission does not prove worker
 readiness. The authenticated worker is implemented and integrated; ordinary guest ownership journeys pass.

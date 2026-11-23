@@ -17,7 +17,7 @@ pytestmark = [
 
 
 def _host(journey, resource, method="inspect", vm=None, generation=None):
-    args = ["floating-ip", "--network", resource["network_id"], method, resource["id"]]
+    args = ["network", "floating-ip", "--network", resource["network_id"], method, resource["id"]]
     if vm is not None:
         args.append(vm["binding"]["id"])
     if generation is not None:
@@ -50,7 +50,7 @@ def _ownerless(item, resource, *, inspection=False):
 
 
 def _grants(journey, resource):
-    return _tcp_data(journey.runner, "floating-ip", "delegation", "ls", resource["id"],
+    return _tcp_data(journey.runner, "network", "floating-ip", "delegation", "ls", resource["id"],
                      "--network", resource["network_id"], kind=list)
 
 
@@ -94,7 +94,7 @@ def test_host_ownership_is_usable_at_return_and_policy_follows_transfer(floating
         journey.flow(source, owner, log, address, port, allowed=False)
     _persistent(_host(journey, resource), resource, owner)
 
-    refused = _run_mvm(journey.runner, "floating-ip", "transfer", resource["id"],
+    refused = _run_mvm(journey.runner, "network", "floating-ip", "transfer", resource["id"],
                        replacement["binding"]["id"], "--network", network["id"],
                        "--generation", str(resource["generation"]), "--json", check=False)
     assert refused.returncode != 0
@@ -149,7 +149,7 @@ def test_finite_guest_grants_cannot_convert_operator_ownership_but_can_release(f
         _persistent(current, resource, owner)
         assert current["generation"] == active["generation"]
         journey.flow(source, owner, log, resource["ipv4"], allowed=True)
-    revoked = _tcp_data(journey.runner, "floating-ip", "delegation", "revoke", grants["associate"]["id"],
+    revoked = _tcp_data(journey.runner, "network", "floating-ip", "delegation", "revoke", grants["associate"]["id"],
                         "--network", resource["network_id"])
     assert revoked["id"] == grants["associate"]["id"] and revoked["state"] == "revoked"
     assert revoked["revision"] > grants["associate"]["revision"]
@@ -180,7 +180,7 @@ def test_vm_stop_fences_persistent_owner_and_restart_requires_new_host_claim(flo
     _ownerless(fenced, resource, inspection=True)
     assert fenced["generation"] > active["generation"]
     for grant in grants:
-        retired = _tcp_data(journey.runner, "floating-ip", "delegation", "inspect", grant["id"],
+        retired = _tcp_data(journey.runner, "network", "floating-ip", "delegation", "inspect", grant["id"],
                             "--network", resource["network_id"])
         assert retired["state"] == "revoked" and retired["revision"] > grant["revision"]
     _run_mvm(journey.runner, "vm", "start", owner["binding"]["id"], timeout=120)

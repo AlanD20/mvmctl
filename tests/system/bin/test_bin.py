@@ -113,7 +113,7 @@ class TestBinaryEdges:
     def test_bin_pull_invalid_version_rejected_before_effects(self, runner_vm: str) -> None:
         """Malformed exact selectors fail locally without contacting the asset source."""
         before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
-        rejected = _run_mvm(runner_vm, "bin", "pull", "not-a-version", "--json", check=False)
+        rejected = _run_mvm(runner_vm, "bin", "pull", "firecracker:not-a-version", "--json", check=False)
         assert rejected.returncode != 0
         envelope = json.loads(rejected.stdout)
         assert envelope["schema_version"] == 1
@@ -153,7 +153,7 @@ class TestBinaryEdges:
         """The removed source-build selector must not change trusted-release state."""
         before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
         rejected = _run_mvm(
-            runner_vm, "bin", "pull", "1.16.0", "--git-ref", "main", check=False,
+            runner_vm, "bin", "pull", "firecracker:1.16.0", "--git-ref", "main", check=False,
         )
         assert rejected.returncode != 0
         assert "unknown flag: --git-ref" in (rejected.stdout + rejected.stderr).lower()
@@ -166,7 +166,7 @@ class TestBinaryEdges:
         before = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
         assert all(item["version"] != version for item in before)
         data = _json_success_data(
-            _run_mvm(runner_vm, "bin", "rm", version, "--json").stdout,
+            _run_mvm(runner_vm, "bin", "rm", f"firecracker:{version}", "--json").stdout,
             dict,
         )
         assert len(data["items"]) == 1
@@ -192,7 +192,7 @@ class TestBinaryEdges:
         assert archive_identity[-1] > 0, archive
 
         pulled = _json_success_data(
-            _run_mvm(runner_vm, "bin", "pull", version, "--json", timeout=300).stdout,
+            _run_mvm(runner_vm, "bin", "pull", f"firecracker:{version}", "--json", timeout=300).stdout,
             list,
         )
         assert len(pulled) == 2
@@ -565,7 +565,7 @@ class TestBinaryPullAndLifecycle:
             assert authority.require("absent")["target_absent"] is True
             attempted = True
             pulled = _json_success_data(
-                _run_mvm(runner_vm, "bin", "pull", target, "--json", timeout=300).stdout,
+                _run_mvm(runner_vm, "bin", "pull", f"firecracker:{target}", "--json", timeout=300).stdout,
                 list,
             )
             admitted = authority.require("admit")
@@ -577,7 +577,7 @@ class TestBinaryPullAndLifecycle:
             assert all(item["is_default"] is False for item in pulled), pulled
             assert authority.require("verify") == owned
             pulled = _json_success_data(
-                _run_mvm(runner_vm, "bin", "pull", target, "--default", "--json", timeout=300).stdout,
+                _run_mvm(runner_vm, "bin", "pull", f"firecracker:{target}", "--default", "--json", timeout=300).stdout,
                 list,
             )
             _require_bin_root_projection(pulled, owned)
@@ -625,7 +625,7 @@ class TestBinaryPullAndLifecycle:
                         verify_defaults()
                         assert authority.require("verify") == owned
                         removed = _json_success_data(
-                            _run_mvm(runner_vm, "bin", "rm", target, "--force", "--json").stdout,
+                            _run_mvm(runner_vm, "bin", "rm", f"firecracker:{target}", "--force", "--json").stdout,
                             dict,
                         )
                         assert len(removed["items"]) == 1
@@ -667,7 +667,7 @@ class TestBinaryPullAndLifecycle:
         )
         rejected = _run_mvm(runner_vm, "bin", "rm", selected["id"], check=False)
         assert rejected.returncode != 0
-        assert "requires exact versions" in (rejected.stdout + rejected.stderr).lower()
+        assert "binary removal requires firecracker:exact-version" in (rejected.stdout + rejected.stderr).lower()
         after = _json_success_data(_run_mvm(runner_vm, "bin", "ls", "--json").stdout, list)
         assert after == before
 
@@ -769,7 +769,7 @@ class TestBinaryLiveVMReleaseLease:
             ).stdout == "bin-live-pair-ok"
 
             denied = _run_mvm(
-                runner_vm, "bin", "rm", version, "--force", "--json", check=False,
+                runner_vm, "bin", "rm", f"firecracker:{version}", "--force", "--json", check=False,
             )
             assert denied.returncode != 0
             envelope = json.loads(denied.stdout)
@@ -784,7 +784,7 @@ class TestBinaryLiveVMReleaseLease:
 
             pulled = _json_success_data(
                 _run_mvm(
-                    runner_vm, "bin", "pull", version, "--force", "--json", timeout=300,
+                    runner_vm, "bin", "pull", f"firecracker:{version}", "--force", "--json", timeout=300,
                 ).stdout,
                 list,
             )

@@ -7,7 +7,7 @@ mvm env apply k8s-worker.yaml
 mvm env apply k8s-policy.yaml
 # Root-backed inspection resolves the reservation's immutable identity. Exec
 # strings in env YAML do not interpolate resource outputs.
-id=$(mvm floating-ip --network k8s inspect k8s-api --json | jq -er .id)
+id=$(mvm network floating-ip --network k8s inspect k8s-api --json | jq -er .data.id)
 [[ $id =~ ^[0-9a-f]{32}$ ]] || { echo 'Invalid floating IP identity' >&2; exit 1; }
 for n in 1 2 3; do
   mvm exec "controller-$n" -- hostnamectl set-hostname "controller-$n"

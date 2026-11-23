@@ -48,7 +48,7 @@ mvm env apply build-base.yaml
 ```
 
 `build-base.yaml` builds the reusable `k8s-base` image. `apply.sh` applies controller resources/grants, worker resources,
-and explicit traffic/exec policies, resolves the floating resource ID using root-backed `mvm floating-ip inspect`, and
+and explicit traffic/exec policies, resolves the floating resource ID using root-backed `mvm network floating-ip inspect`, and
 passes the validated immutable ID through ordinary `mvm exec` to the fixed guest setup helper. Env command strings
 cannot interpolate resource outputs. All three lease services start before initialization. Joining controllers and
 workers use `mvm exec --allow-vm-exec` and `mvm-agent remote --user` with directional policies to controller-1.
