@@ -23,10 +23,10 @@ def floating_network(runner_vm):
         networks = _json_success_data(_run_mvm(runner_vm, "network", "ls", "--json").stdout, list)
         if any(item["id"] == created["id"] for item in networks):
             items = _json_success_data(
-                _run_mvm(runner_vm, "floating-ip", "ls", "--network", name, "--json").stdout, list
+                _run_mvm(runner_vm, "network", "floating-ip", "ls", "--network", name, "--json").stdout, list
             )
             for item in items:
-                _run_mvm(runner_vm, "floating-ip", "rm", item["id"], "--network", name, "--force")
+                _run_mvm(runner_vm, "network", "floating-ip", "rm", item["id"], "--network", name, "--force")
             _run_mvm(runner_vm, "network", "rm", name, "--force")
         remaining = _json_success_data(_run_mvm(runner_vm, "network", "ls", "--json").stdout, list)
         assert all(item["id"] != created["id"] for item in remaining), "owned test network survived cleanup"

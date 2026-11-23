@@ -36,6 +36,7 @@ func NewService(
 func (service *Service) EnsureManagedNetwork(ctx context.Context, network *model.NetworkItem) error {
 	result, err := service.managed.CreateManagedNetwork(ctx, networkservice.ManagedNetworkCreateRequest{
 		NetworkID: network.ID, Prefix: network.Subnet, Gateway: network.IPv4Gateway, NAT: network.NATEnabled,
+		Uplink: network.NATUplink, UplinkGateway: network.NATUplinkGateway,
 	})
 	if err != nil {
 		slog.Error("failed to configure root-owned managed network", "network_id", network.ID, "error", err)

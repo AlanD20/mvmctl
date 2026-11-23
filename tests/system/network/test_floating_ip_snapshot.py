@@ -110,7 +110,7 @@ def test_memory_restore_requires_fresh_current_incarnation_grants(snapshot_journ
                _tcp_data(journey.runner, "vm", "ls", kind=list))
     del journey.vms[source["binding"]["name"]]
     for grant in grants:
-        retired = _tcp_data(journey.runner, "floating-ip", "delegation", "inspect", grant["id"],
+        retired = _tcp_data(journey.runner, "network", "floating-ip", "delegation", "inspect", grant["id"],
                             "--network", network["id"])
         assert retired["state"] == "revoked" and retired["revision"] > grant["revision"], retired
     name = f"fip-restored-{journey.suffix}"

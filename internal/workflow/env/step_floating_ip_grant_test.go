@@ -3,16 +3,19 @@ package env
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 )
 
 func floatingIPGrantTestAPI() *testutil.MockOperation {
@@ -26,66 +29,94 @@ func floatingIPGrantTestAPI() *testutil.MockOperation {
 	return op
 }
 
-func TestFloatingIPGrantUnknownOutcomeCanBeRevokedAfterVMStops(t *testing.T) {
-	// Destruction must recover exact grant authority without a live VM or a new delegation.
+func TestFloatingIPGrantDestroyRetainsBatchAfterRecoveredGrantRevokeFails(t *testing.T) {
 	op := floatingIPGrantTestAPI()
-	var saved model.ResourceState
-	write := func(_ context.Context, value model.ResourceState) error { saved = value; return nil }
-	var grant *model.FloatingIPDelegationItem
+	const spec = `version: "1"
+floating_ip_grant:
+  controller:
+    network: cluster
+    resource: api
+    vms: [controller]
+    methods:
+      - method: inspect
+      - method: release
+`
+	path := filepath.Join(t.TempDir(), "env.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(spec), 0600))
+	ctx := t.Context()
+	grants := make(map[string]model.FloatingIPDelegationItem)
 	lost := errors.New("grant response lost")
-	op.FloatingIPDelegationEnsureFunc = func(_ context.Context, input inputs.FloatingIPDelegationEnsureInput) (*model.FloatingIPDelegationItem, error) {
-		require.Equal(t, input.ID, saved.Output.GetString("grant_id"), "grant ID must precede effect")
-		grant = &model.FloatingIPDelegationItem{
+	op.FloatingIPDelegationEnsureFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationEnsureInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		grant := model.FloatingIPDelegationItem{
 			ID:               input.ID,
 			NetworkID:        input.Network,
 			ResourceID:       input.Resource,
 			VMID:             input.VM,
 			Method:           input.Method,
-			LeaseDuration:    10 * time.Second,
 			BootID:           "33333333-3333-4333-8333-333333333333",
 			LaunchGeneration: 9,
 			ExecutionUID:     42000,
 			Revision:         1,
 			State:            "active",
 		}
-		return nil, lost
+		grants[grant.ID] = grant
+		if grant.Method == "release" {
+			return nil, lost
+		}
+		return &grant, nil
 	}
-	spec := model.ResourceMap{
-		"network":  "cluster",
-		"resource": "api",
-		"vm":       "controller",
-		"method":   "associate",
-		"lease":    "10s",
-	}
-	step, err := newFloatingIPGrantStepFromSpec("floating_ip_grant", "controller-associate", spec, op)
+	require.ErrorIs(t, Apply(ctx, op, path, nil, nil), lost)
+	require.Len(t, grants, 2)
+	stateDir := infra.GetWorkflowsStateDirByID(ResolveWorkflowID(path))
+	before, err := workflow.ReadWorkflowState(stateDir)
 	require.NoError(t, err)
-	require.ErrorIs(t, step.Apply(t.Context(), workflow.NewSharedState(), model.ResourceState{}, write, nil), lost)
-	require.NotNil(t, grant)
+	require.Len(t, before.Resources, 1)
+	batch := StateFromMap[FloatingIPGrantState](before.Resources[0].State.Output)
+	require.NotNil(t, batch)
+	require.Len(t, batch.Grants, 2)
+	assert.Nil(t, batch.Grants[1].Receipt, "release committed without returning its receipt")
+
 	op.VMGetFunc = func(context.Context, inputs.VMInput) (*model.VMItem, error) {
-		t.Fatal("cleanup must not require a live VM")
-		return nil, nil
+		return nil, errors.New("VM stopped")
 	}
-	op.FloatingIPDelegationGetFunc = func(_ context.Context, input inputs.FloatingIPDelegationInput) (*model.FloatingIPDelegationItem, error) {
-		require.Equal(t, grant.ID, input.ID)
-		return grant, nil
+	op.FloatingIPDelegationGetFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		grant, ok := grants[input.ID]
+		if !ok || grant.NetworkID != input.Network {
+			return nil, errs.NotFound(errs.CodeNetworkNotFound, "grant absent")
+		}
+		return &grant, nil
 	}
-	revoked := false
-	op.FloatingIPDelegationRemoveOwnedFunc = func(_ context.Context, input inputs.FloatingIPDelegationRemoveOwnedInput) (*model.FloatingIPDelegationItem, error) {
-		assert.Equal(t, *grant, input.Grant)
-		persisted := StateFromMap[FloatingIPGrantState](saved.Output)
-		require.NotNil(t, persisted.Receipt, "recovered root receipt must precede cleanup")
-		assert.Equal(t, uint64(9), persisted.Receipt.LaunchGeneration)
-		result := input.Grant
-		result.State, result.Revision = "revoked", 3
-		revoked = true
-		return &result, nil
+	revokeErr := errors.New("grant revocation interrupted")
+	op.FloatingIPDelegationRemoveOwnedFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationRemoveOwnedInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		assert.Equal(t, grants[input.Grant.ID], input.Grant)
+		assert.Equal(t, "release", input.Grant.Method, "cleanup encounters the recovered grant first")
+		return nil, revokeErr
 	}
-	restored, err := newFloatingIPGrantStepFromState("floating_ip_grant", "controller-associate", saved,
-		[]string{"vm:controller", "floating_ip:api"}, op)
+	require.ErrorIs(t, Destroy(ctx, op, path, nil), revokeErr)
+	after, err := workflow.ReadWorkflowState(stateDir)
 	require.NoError(t, err)
-	require.NoError(t, restored.Destroy(t.Context(), saved, write, nil))
-	assert.True(t, revoked)
-	assert.ElementsMatch(t, []string{"vm:controller", "floating_ip:api"}, restored.Dependencies())
+	testutil.AssertDiff(t, before.Resources, after.Resources)
+
+	op.FloatingIPDelegationRemoveOwnedFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationRemoveOwnedInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		grant := grants[input.Grant.ID]
+		assert.Equal(t, grant, input.Grant)
+		grant.State, grant.Revision = "revoked", 3
+		grants[grant.ID] = grant
+		return &grant, nil
+	}
+	require.NoError(t, Destroy(ctx, op, path, nil))
+	for id, grant := range grants {
+		assert.Equal(t, "revoked", grant.State, "grant %s", id)
+	}
+	assert.NoDirExists(t, stateDir)
 }
 
 func TestFloatingIPGrantReapplyRefusesChangedIncarnation(t *testing.T) {
@@ -103,7 +134,12 @@ func TestFloatingIPGrantReapplyRefusesChangedIncarnation(t *testing.T) {
 			VMID: input.VM, Method: input.Method, LaunchGeneration: generation, ExecutionUID: 42000,
 			BootID: "33333333-3333-4333-8333-333333333333", Revision: 1, State: "active"}, nil
 	}
-	spec := model.ResourceMap{"network": "cluster", "resource": "api", "vm": "controller", "method": "inspect"}
+	spec := model.ResourceMap{
+		"network":  "cluster",
+		"resource": "api",
+		"vms":      []string{"controller"},
+		"methods":  []map[string]string{{"method": "inspect"}},
+	}
 	step, err := newFloatingIPGrantStepFromSpec("floating_ip_grant", "inspect", spec, op)
 	require.NoError(t, err)
 	require.NoError(t, step.Apply(t.Context(), workflow.NewSharedState(), model.ResourceState{}, write, nil))
@@ -115,24 +151,29 @@ func TestFloatingIPGrantReapplyRefusesChangedIncarnation(t *testing.T) {
 		retry.Apply(t.Context(), workflow.NewSharedState(), saved, write, nil),
 		"refusing to adopt a replacement",
 	)
-	assert.Equal(t, uint64(1), StateFromMap[FloatingIPGrantState](saved.Output).Receipt.LaunchGeneration)
+	assert.Equal(t, uint64(1), StateFromMap[FloatingIPGrantState](saved.Output).Grants[0].Receipt.LaunchGeneration)
 }
 
 func TestFloatingIPGrantDoesNotAdoptDifferentMethodDuringCleanup(t *testing.T) {
 	op := floatingIPGrantTestAPI()
-	spec := model.ResourceMap{"network": "cluster", "resource": "api", "vm": "controller", "method": "inspect"}
+	spec := model.ResourceMap{
+		"network":  "cluster",
+		"resource": "api",
+		"vms":      []string{"controller"},
+		"methods":  []map[string]string{{"method": "inspect"}},
+	}
 	step, err := newFloatingIPGrantStepFromSpec("floating_ip_grant", "inspect", spec, op)
 	require.NoError(t, err)
 	record := step.StateData()
 	record.Meta.WasCreated = true
 	record.Output = StructToMap(
-		&FloatingIPGrantState{
+		&FloatingIPGrantState{Grants: []floatingIPGrantState{{
 			GrantID:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			NetworkID:  floatingIPTestNetworkID,
 			ResourceID: "11111111111111111111111111111111",
 			VMID:       "22222222222222222222222222222222",
 			Method:     "inspect",
-		},
+		}}},
 	)
 	op.FloatingIPDelegationGetFunc = func(context.Context, inputs.FloatingIPDelegationInput) (*model.FloatingIPDelegationItem, error) {
 		return &model.FloatingIPDelegationItem{
@@ -148,4 +189,82 @@ func TestFloatingIPGrantDoesNotAdoptDifferentMethodDuringCleanup(t *testing.T) {
 		step.Destroy(t.Context(), record, func(context.Context, model.ResourceState) error { return nil }, nil),
 		"refusing to adopt a replacement",
 	)
+}
+
+func TestFloatingIPGrantBatchPinsEachLaunchAndCleansPartialApply(t *testing.T) {
+	op := floatingIPGrantTestAPI()
+	const (
+		firstVM  = "22222222222222222222222222222222"
+		secondVM = "44444444444444444444444444444444"
+		bootID   = "33333333-3333-4333-8333-333333333333"
+	)
+	op.VMGetFunc = func(_ context.Context, input inputs.VMInput) (*model.VMItem, error) {
+		id := firstVM
+		if input.Identifiers[0] == "controller-2" {
+			id = secondVM
+		}
+		return &model.VMItem{ID: id, NetworkID: floatingIPTestNetworkID}, nil
+	}
+	spec := model.ResourceMap{
+		"network": "cluster", "resource": "api",
+		"vms":     []string{"controller-1", "controller-2"},
+		"methods": []map[string]string{{"method": "inspect"}, {"method": "release"}},
+	}
+	ctx := t.Context()
+	step, err := newFloatingIPGrantStepFromSpec("floating_ip_grant", "controllers", spec, op)
+	require.NoError(t, err)
+	var saved model.ResourceState
+	write := func(_ context.Context, value model.ResourceState) error { saved = value; return nil }
+	var committed model.FloatingIPDelegationItem
+	launchChanged := errors.New("VM restarted")
+	calls := 0
+	op.FloatingIPDelegationEnsureFunc = func(
+		_ context.Context, request inputs.FloatingIPDelegationEnsureInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		batch := StateFromMap[FloatingIPGrantState](saved.Output)
+		require.Len(t, batch.Grants, 4, "every pair must be persisted before any root effect")
+		assert.Equal(t, request.ID, batch.Grants[calls].GrantID)
+		assert.Equal(t, firstVM, request.VM)
+		calls++
+		if request.Method == "release" {
+			require.NotNil(t, request.Expected)
+			assert.True(t, request.Expected.Matches(bootID, 7, 42000))
+			return nil, launchChanged
+		}
+		require.Nil(t, request.Expected)
+		committed = model.FloatingIPDelegationItem{
+			ID: request.ID, NetworkID: request.Network, ResourceID: request.Resource, VMID: request.VM,
+			Method: request.Method, BootID: bootID, LaunchGeneration: 7, ExecutionUID: 42000,
+			Revision: 1, State: "active",
+		}
+		return &committed, nil
+	}
+	err = step.Apply(ctx, workflow.NewSharedState(), model.ResourceState{}, write, nil)
+	require.ErrorIs(t, err, launchChanged)
+	assert.Equal(t, 2, calls)
+	require.NotNil(t, StateFromMap[FloatingIPGrantState](saved.Output).Grants[0].Receipt)
+
+	restored, err := newFloatingIPGrantStepFromState("floating_ip_grant", "controllers", saved, nil, op)
+	require.NoError(t, err)
+	op.VMGetFunc = func(context.Context, inputs.VMInput) (*model.VMItem, error) {
+		t.Fatal("partial cleanup must not resolve live VMs")
+		return nil, nil
+	}
+	op.FloatingIPDelegationGetFunc = func(
+		context.Context, inputs.FloatingIPDelegationInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		return nil, errs.NotFound(errs.CodeNetworkNotFound, "grant absent")
+	}
+	var removed []string
+	op.FloatingIPDelegationRemoveOwnedFunc = func(
+		_ context.Context, input inputs.FloatingIPDelegationRemoveOwnedInput,
+	) (*model.FloatingIPDelegationItem, error) {
+		assert.Equal(t, committed, input.Grant)
+		removed = append(removed, input.Grant.ID)
+		receipt := input.Grant
+		receipt.State = "revoked"
+		return &receipt, nil
+	}
+	require.NoError(t, restored.Destroy(ctx, saved, write, nil))
+	assert.Equal(t, []string{committed.ID}, removed)
 }

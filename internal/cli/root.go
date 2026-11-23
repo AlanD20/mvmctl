@@ -113,8 +113,9 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		vmCmd := NewVMCmd(op, op)
 		vmCmd.AddCommand(newVMLabelsCmd(op))
 		cmd.AddCommand(vmCmd)
-		cmd.AddCommand(NewNetworkCmd(op, op))
-		cmd.AddCommand(NewFloatingIPCmd(op, op))
+		networkCmd := NewNetworkCmd(op, op)
+		networkCmd.AddCommand(NewFloatingIPCmd(op, op))
+		cmd.AddCommand(networkCmd)
 		cmd.AddCommand(NewImageCmd(op, op))
 		cmd.AddCommand(NewKernelCmd(op, op))
 		cmd.AddCommand(NewBinaryCmd(op, op))
@@ -151,6 +152,22 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		}{Text: text.String()})
 	})
 	return cmd
+}
+
+// RequestsStructuredOutput reads the actual command flags without initializing services or running a command.
+func RequestsStructuredOutput(args []string) bool {
+	previousOp := opRef
+	defer func() { opRef = previousOp }()
+	root := NewRootCmd(&api.Operation{})
+	cmd, flags, err := root.Find(args)
+	if err != nil || cmd == nil {
+		return false
+	}
+	cmd.InitDefaultHelpFlag()
+	// Flags parsed before an invalid argument still describe the requested error format.
+	_ = cmd.ParseFlags(flags)
+	enabled, _ := cmd.Flags().GetBool("json")
+	return enabled
 }
 
 func configureStructuredCommands(cmd *cobra.Command) {

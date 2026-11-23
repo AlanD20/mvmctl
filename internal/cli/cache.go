@@ -419,13 +419,13 @@ func newCacheCleanCmd(cacheAPI api.CacheAPI) *cobra.Command {
 
 This is the "nuclear option" for cache cleanup. It:
 1. Prunes ALL resources (VMs, networks, images, kernels, binaries, misc)
-2. Cleans host networking (TAPs, bridges, iptables chains)
+2. Cleans host networking (TAPs, bridges, managed nftables rules)
 3. Removes the entire cache directory at ~/.cache/mvmctl
 
 Examples:
   mvm cache clean                # Clean all cache (with confirmation)
   mvm cache clean --dry-run      # Preview what would be removed
-	  mvm cache clean --force        # Clean without confirmation`,
+  mvm cache clean --force        # Clean without confirmation`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dryRun {
 				common.Cli.Info("[DRY RUN] The following would be removed:")
@@ -436,7 +436,7 @@ Examples:
 				common.Cli.Info("  - ALL binaries (including default)")
 				common.Cli.Info("  - Appliance folder (libguestfs cache)")
 				common.Cli.Info("  - Warm images (tmpfs ready pool)")
-				common.Cli.Info("  - Host networking (TAPs, bridges, iptables chains)")
+				common.Cli.Info("  - Host networking (TAPs, bridges, managed nftables rules)")
 				common.Cli.Info("  - Entire cache directory (~/.cache/mvmctl)")
 			} else if !force {
 				common.Cli.Warning("This will COMPLETELY remove ALL cache data INCLUDING:")
@@ -447,7 +447,7 @@ Examples:
 				common.Cli.Info("  - ALL binaries (including default)")
 				common.Cli.Info("  - Appliance folder (libguestfs cache)")
 				common.Cli.Info("  - Warm images (tmpfs ready pool)")
-				common.Cli.Info("  - Host networking (TAPs, bridges, iptables chains)")
+				common.Cli.Info("  - Host networking (TAPs, bridges, managed nftables rules)")
 				common.Cli.Info("  - Entire cache directory (~/.cache/mvmctl)")
 				common.Cli.Info("")
 				cleanConfirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Continue?", true)

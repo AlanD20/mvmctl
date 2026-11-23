@@ -22,8 +22,8 @@ import (
 )
 
 func TestInitStatePreservesExplicitBinaryVersionAfterSuccessfulSudo(t *testing.T) {
-	common.BeginOutput(nil)
-	t.Cleanup(func() { common.BeginOutput(nil) })
+	common.BeginOutput(false)
+	t.Cleanup(func() { common.BeginOutput(false) })
 	reader, writer, err := os.Pipe()
 	require.NoError(t, err)
 	_, err = writer.WriteString("y\n")
@@ -95,8 +95,8 @@ func TestInitBootstrapTreatsPrePolicyAsInformationalAndVerifiesAfter(t *testing.
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			common.BeginOutput(nil)
-			t.Cleanup(func() { common.BeginOutput(nil) })
+			common.BeginOutput(false)
+			t.Cleanup(func() { common.BeginOutput(false) })
 			reader, writer, err := os.Pipe()
 			require.NoError(t, err)
 			_, err = writer.WriteString("y\n")
@@ -205,8 +205,8 @@ func TestInitNonInteractiveSudoOutcome(t *testing.T) {
 			originalRunner := system.DefaultRunner
 			system.DefaultRunner = &testutil.FakeRunner{StubRunResult: tc.result, StubRunErr: tc.runErr}
 			t.Cleanup(func() { system.DefaultRunner = originalRunner })
-			common.BeginOutput(nil)
-			t.Cleanup(func() { common.BeginOutput(nil) })
+			common.BeginOutput(false)
+			t.Cleanup(func() { common.BeginOutput(false) })
 
 			output, err := os.CreateTemp(t.TempDir(), "init-output-")
 			require.NoError(t, err)
@@ -309,8 +309,8 @@ func TestInitInteractiveRequiresConfirmedInactiveSessionBeforeSkippingHost(t *te
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			common.BeginOutput(nil)
-			t.Cleanup(func() { common.BeginOutput(nil) })
+			common.BeginOutput(false)
+			t.Cleanup(func() { common.BeginOutput(false) })
 			reader, writer, err := os.Pipe()
 			require.NoError(t, err)
 			_, err = writer.WriteString("n\n")

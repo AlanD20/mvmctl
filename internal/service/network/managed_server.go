@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/lib/authorityfs"
+	netlib "mvmctl/internal/lib/network"
 	"mvmctl/internal/service/firewall"
 	"mvmctl/pkg/errs"
 )
@@ -69,8 +70,11 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 	if err := tx.rejectPrefixOverlap(ctx, l3); err != nil {
 		return ManagedNetworkResult{}, err
 	}
+	gateway, _ := netlib.ParseUplinkGateway(request.UplinkGateway)
 	if tx.found {
-		if tx.record.configuration.l3 != l3 || tx.record.configuration.nat != request.NAT {
+		if tx.record.configuration.l3 != l3 || tx.record.configuration.nat != request.NAT ||
+			tx.record.configuration.uplink.requestedName().String() != request.Uplink ||
+			tx.record.configuration.uplink.gatewayIntent() != gateway {
 			return ManagedNetworkResult{}, errs.New(
 				errs.CodeNetworkAlreadyExists,
 				"managed network intent differs from root authority",
@@ -82,12 +86,17 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 		return ManagedNetworkResult{}, err
 	}
 	if request.NAT {
-		tx.uplink, err = retainUplink(ctx, host)
+		tx.uplink, err = retainUplink(ctx, host, linkName(request.Uplink), gateway, l3.prefix.value)
 		if err != nil {
 			return ManagedNetworkResult{}, err
 		}
 		if tx.found && tx.priorBoot == nil && tx.uplink.selected != *tx.record.configuration.uplink {
 			return ManagedNetworkResult{}, networkAuthorityCorruptError("managed network NAT uplink changed", nil)
+		}
+	}
+	if tx.priorBoot != nil {
+		if err := verifyNamedRouting(ctx, fd, *tx.priorBoot, false); err != nil {
+			return ManagedNetworkResult{}, err
 		}
 	}
 	if !tx.found || tx.priorBoot != nil {
@@ -186,6 +195,9 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 			selected := tx.uplink.selected
 			tx.record.configuration.uplink = &selected
 		}
+		if err := verifyNamedRouting(ctx, fd, tx.record, false); err != nil {
+			return ManagedNetworkResult{}, tx.removeUnpublishedBridge(ctx, bridge, err)
+		}
 		// CRITICAL: Publish exact down-link ownership before addressing or exposure. A later failure is retryable by ID.
 		var writeErr error
 		if tx.priorBoot != nil {
@@ -217,6 +229,9 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 			return ManagedNetworkResult{}, err
 		}
 	}
+	if err := tx.configureNamedRouting(ctx, fd); err != nil {
+		return ManagedNetworkResult{}, err
+	}
 	if err := tx.beginFirewall(ctx); err != nil {
 		return ManagedNetworkResult{}, err
 	}
@@ -231,6 +246,9 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 			return ManagedNetworkResult{}, err
 		}
 	}
+	if err := verifyNamedRouting(ctx, fd, tx.record, true); err != nil {
+		return ManagedNetworkResult{}, err
+	}
 	if err := tx.setBridgeState(ctx, true); err != nil {
 		return ManagedNetworkResult{}, err
 	}
@@ -242,7 +260,8 @@ func (server *ManagedNetworkServer) CreateManagedNetwork(
 		)
 	}
 	return ManagedNetworkResult{NetworkID: request.NetworkID, Bridge: tx.record.managedBridge.name.String(),
-		Prefix: request.Prefix, Gateway: request.Gateway, NAT: request.NAT}, nil
+		Prefix: request.Prefix, Gateway: request.Gateway, NAT: request.NAT, Uplink: request.Uplink,
+		UplinkGateway: request.UplinkGateway}, nil
 }
 
 // RemoveManagedNetwork requires a childless exact bridge, removes exposure, revokes the global graph, then deletes authority.
@@ -305,6 +324,11 @@ func (server *ManagedNetworkServer) RemoveManagedNetwork(
 	if err := tx.firewall.RemoveNetwork(ctx, tx.firewallIntent()); err != nil {
 		return ManagedNetworkRemovalResult{}, err
 	}
+	if plan, named := namedRoutingFor(tx.record); named {
+		if err := plan.reconcile(ctx, newDirectRouteNetlink(), fd, false); err != nil {
+			return ManagedNetworkRemovalResult{}, networkAuthorityEffectError("remove named-uplink routing", err)
+		}
+	}
 	bridge, err = tx.inspectBridge(ctx, true)
 	if err != nil {
 		return ManagedNetworkRemovalResult{}, err
@@ -351,8 +375,11 @@ func (tx *managedNetworkTransaction) removePriorBootNetwork(ctx context.Context)
 	if err := tx.requireNoLiveTopologyClaims(ctx); err != nil {
 		return err
 	}
-	_, host, err := tx.host.descriptor()
+	fd, host, err := tx.host.descriptor()
 	if err != nil {
+		return err
+	}
+	if err := verifyNamedRouting(ctx, fd, tx.record, false); err != nil {
 		return err
 	}
 	tx.firewall, err = firewall.BeginPolicyChange(ctx, tx.mutation, firewall.PolicyBinding{

@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/api"
 )
 
-func TestBinaryPullAndRemoveCompleteOnlyDeduplicatedInstalledVersions(t *testing.T) {
+func TestBinaryReleaseCompletionReturnsTypedSelectors(t *testing.T) {
 	architecture := system.RuntimeArch()
 	repo := testutil.NewBinaryRepo()
 	for _, item := range []*model.BinaryItem{
@@ -35,14 +35,19 @@ func TestBinaryPullAndRemoveCompleteOnlyDeduplicatedInstalledVersions(t *testing
 	t.Cleanup(func() { opRef = previous })
 	binaryCmd := NewBinaryCmd(op, nil)
 
-	for _, name := range []string{"pull", "rm"} {
-		t.Run(name, func(t *testing.T) {
-			cmd, _, err := binaryCmd.Find([]string{name})
+	for _, test := range []struct {
+		name string
+		want []string
+	}{
+		{name: "pull", want: []string{"firecracker", "firecracker:1.15.2", "firecracker:1.16.1"}},
+		{name: "rm", want: []string{"firecracker:1.15.2", "firecracker:1.16.1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd, _, err := binaryCmd.Find([]string{test.name})
 			require.NoError(t, err)
 			got, directive := cmd.ValidArgsFunction(cmd, nil, "")
-			assert.Equal(t, []string{"1.15.2", "1.16.1"}, got)
+			assert.Equal(t, test.want, got)
 			assert.Equal(t, uint(cobra.ShellCompDirectiveNoFileComp), uint(directive))
-			assert.NotContains(t, got, "firecracker")
 			assert.NotContains(t, got, "jailer")
 			assert.NotContains(t, got, "fc-116")
 		})

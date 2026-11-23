@@ -103,8 +103,18 @@ func (locker managedNetworkLocker) LockNetwork(ctx context.Context, key networkK
 			return nil, networkAuthorityEffectError("admit managed bridge and L3 authority", err)
 		}
 	}
+	if !locker.cleanup {
+		if err := verifyNamedRouting(ctx, fd, record, true); err != nil {
+			return nil, err
+		}
+	}
 	if record.configuration.nat && !locker.cleanup {
-		lease.uplink, err = retainUplink(ctx, identity)
+		lease.uplink, err = retainUplink(
+			ctx,
+			identity,
+			record.configuration.uplink.requestedName(),
+			record.configuration.uplink.gatewayIntent(), record.configuration.l3.prefix.value,
+		)
 		if err != nil {
 			return nil, err
 		}

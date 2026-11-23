@@ -16,7 +16,8 @@ import (
 )
 
 type resumeTestBroker struct {
-	err error
+	err     error
+	applied bool
 }
 
 func (broker resumeTestBroker) Resume(
@@ -26,10 +27,10 @@ func (broker resumeTestBroker) Resume(
 	if err := ctx.Err(); err != nil {
 		return jailersvc.VMAPIResult{}, err
 	}
-	if broker.err != nil {
+	if broker.err != nil && !broker.applied {
 		return jailersvc.VMAPIResult{}, broker.err
 	}
-	return jailersvc.VMAPIResult{VMID: request.VMID, Applied: true}, nil
+	return jailersvc.VMAPIResult{VMID: request.VMID, Applied: true}, broker.err
 }
 
 // newResumeControllerDB uses the production schema/repository because refusal must leave durable projection intact.
@@ -91,6 +92,17 @@ func TestControllerResumeProjectsOnlyRootConfirmedRunning(t *testing.T) {
 			assert.Equal(t, model.VMStatusRunning, persisted.Status)
 		})
 	}
+}
+
+func TestControllerResumeProjectsRunningWhenGuestControlReconciliationFails(t *testing.T) {
+	controller, _ := newResumeControllerDB(t, model.VMStatusPaused)
+	workerErr := errs.New(errs.CodeVMResumeGuestControlFailed, "Guest Control reconciliation failed")
+	err := controller.resume(t.Context(), resumeTestBroker{err: workerErr, applied: true})
+	assert.ErrorIs(t, err, workerErr)
+	persisted, err := controller.repo.Get(t.Context(), controller.vm.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted)
+	assert.Equal(t, model.VMStatusRunning, persisted.Status)
 }
 
 func TestControllerResumeCancelledAuthorityDoesNotProjectRunning(t *testing.T) {

@@ -3,7 +3,6 @@ package firewall
 import (
 	"maps"
 	"math"
-	"slices"
 
 	"mvmctl/internal/lib/model"
 )
@@ -12,7 +11,8 @@ type vmLabelRecord struct {
 	OwnerUID uint32         `json:"owner_uid"`
 	Revision uint64         `json:"revision"`
 	Labels   model.VMLabels `json:"labels"`
-	Retired  bool           `json:"retired"`
+	// Retained for journals written before label eviction followed backing retirement.
+	Retired bool `json:"retired"`
 }
 
 // vmLabelRecords tracks root-owned identity independently of a running network endpoint.
@@ -100,21 +100,6 @@ func (records vmLabelRecords) replace(
 	return cloneVMLabelRecord(record), nil
 }
 
-func (records vmLabelRecords) retire(ownerUID uint32, vmID string, expected uint64) error {
-	record, err := records.ownedAtRevision(ownerUID, vmID, expected)
-	if err != nil {
-		return err
-	}
-	if record.Revision == math.MaxUint64 {
-		return invalidGeneration("VM label revision exhausted")
-	}
-	record.Revision++
-	record.Labels = make(model.VMLabels)
-	record.Retired = true
-	records[vmID] = record
-	return nil
-}
-
 func (records vmLabelRecords) ownedAtRevision(ownerUID uint32, vmID string, expected uint64) (vmLabelRecord, error) {
 	record, found := records[vmID]
 	if ownerUID == 0 || expected == 0 || !found || record.OwnerUID != ownerUID ||
@@ -122,17 +107,6 @@ func (records vmLabelRecords) ownedAtRevision(ownerUID uint32, vmID string, expe
 		return vmLabelRecord{}, invalidGeneration("VM label owner or revision differs")
 	}
 	return record, nil
-}
-
-func (records vmLabelRecords) members(ownerUID uint32, selector model.VMLabelSelector) []string {
-	var members []string
-	for vmID, record := range records {
-		if record.OwnerUID == ownerUID && !record.Retired && selector.Matches(record.Labels) {
-			members = append(members, vmID)
-		}
-	}
-	slices.Sort(members)
-	return members
 }
 
 func cloneVMLabelRecord(record vmLabelRecord) vmLabelRecord {

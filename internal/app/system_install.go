@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"mvmctl/internal/core/host"
@@ -29,34 +30,21 @@ type systemInstallDeps struct {
 // RunHostInstallSystemBinary so malformed invocations cannot fall through to
 // normal application initialization.
 func IsHostInstallSystemBinaryInvocation(args []string) bool {
+	return reservesHostCommand(args, "install-system")
+}
+
+// reservesHostCommand only routes a reserved operation. Its parser decides whether the arguments are valid.
+func reservesHostCommand(args []string, action string) bool {
 	if len(args) == 0 {
 		return false
 	}
-
-	// A leading flag makes following non-flag tokens ambiguous: they can be
-	// malformed flag values rather than a different command. Reserve the
-	// security-sensitive sequence in that case and let the exact validator
-	// reject it. An ordinary unflagged command before host remains ordinary.
 	leadingFlag := strings.HasPrefix(args[0], "-")
-	hostIndex := -1
 	for index, arg := range args {
 		if arg == "help" {
 			return false
 		}
 		if arg == "host" {
-			if index > 0 && !leadingFlag {
-				return false
-			}
-			hostIndex = index
-			break
-		}
-	}
-	if hostIndex < 0 {
-		return false
-	}
-	for _, arg := range args[hostIndex+1:] {
-		if arg == "install-system" {
-			return true
+			return (index == 0 || leadingFlag) && slices.Contains(args[index+1:], action)
 		}
 	}
 	return false

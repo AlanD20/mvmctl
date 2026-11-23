@@ -206,9 +206,12 @@ func completeInstalledBinaryReleaseVersions(
 	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil, nil)
 	versions := make([]string, 0, len(binaries)/2)
 	for _, item := range binaries {
-		if item.Version != "" && strings.HasPrefix(item.Version, toComplete) &&
-			!slices.Contains(versions, item.Version) {
-			versions = append(versions, item.Version)
+		if item.Type != "firecracker" || item.Version == "" {
+			continue
+		}
+		selector := item.Type + ":" + item.Version
+		if strings.HasPrefix(selector, toComplete) && !slices.Contains(versions, selector) {
+			versions = append(versions, selector)
 		}
 	}
 	sort.Strings(versions)

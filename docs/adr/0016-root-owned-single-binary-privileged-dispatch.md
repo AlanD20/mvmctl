@@ -1644,15 +1644,11 @@ The activation order is fixed:
     authority that the pidfd/start-tick-bound task is the exact leaf's sole member. A failed limit or membership proof
     preserves that same lease, and retry repeats both. Then atomically replace `launching` with `active`.
 
-The v0.3.0 public network/NAT request carries only whether NAT is enabled. It exposes no `NATGateways`, uplink name,
-ifindex, route, or selector. When NAT is enabled, root discovers exactly one eligible IPv4 main-table default-route
-uplink through its typed, host-network-namespace-bound rtnetlink authority. An eligible route is unicast `0.0.0.0/0`,
-has one output interface and no multipath next hops, and resolves to a non-loopback, non-mvm-owned link. Root persists
-the exact ifindex, name, kind, and host network-namespace identity, then revalidates the route and link before firewall
-compilation, application, and topology activation. Zero eligible uplinks, multiple eligible uplinks regardless of
-metric, replacement, or changed identity fails closed. Multi-uplink selection is unsupported in v0.3.0. Removing the
-current public input/model surface, replacing the compiler's raw uplink string with the retained typed identity, and
-adding L1/L2 coverage remain pending; this decision does not claim those code changes.
+Root resolves NAT uplink intent through typed rtnetlink in the retained host network namespace.
+The caller may choose Auto, None, or name an existing interface with an optional on-link IPv4 next hop.
+Ifindex, route table, routing rules, and cleanup authority come from root. See
+[ADR-0017](0017-per-vm-network-namespaces-and-typed-policies.md#nat-uplink-selection-and-routing)
+for the network admission and lifecycle contract.
 
 Sealing makes the copied inode immutable to the dropped caller and preserves the exact-content proof established at
 activation. Later status batches can compare the root-owned inode and metadata without rehashing every executable;

@@ -548,7 +548,7 @@ print(json.dumps(result,sort_keys=True))
             assert self.borrowed_release is not None, "prepare borrowed release before selecting private cache"
             self.assert_borrowed_release()
             super().initialize()  # Preserve the original exact operator cache-init command.
-            result = _run_mvm(self.runner_vm, "bin", "pull", "1.17.0", "--json", timeout=300, check=False)
+            result = _run_mvm(self.runner_vm, "bin", "pull", "firecracker:1.17.0", "--json", timeout=300, check=False)
             self.save_native("borrowed-release-pull", result)
             assert result.returncode == 0, result.stdout
             admitted = _json_success_data(result.stdout, list)

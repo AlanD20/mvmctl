@@ -3,8 +3,11 @@ package network
 import (
 	"cmp"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 
@@ -12,27 +15,32 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// selectedUplink is kernel evidence, never a caller-selectable interface or route.
+// selectedUplink holds root-observed link and default-route evidence.
 type selectedUplink struct {
-	link       linkIdentity
-	kind       string
-	deviceType uint16
-	alias      string
-	master     int
-	route      routeIPv4Observation
+	requestedGateway netip.Addr
+	named            bool
+	link             linkIdentity
+	kind             string
+	deviceType       uint16
+	alias            string
+	master           int
+	route            routeIPv4Observation
 }
 
 type uplinkLease struct {
 	// mu prevents a retained namespace from closing during observation or use.
-	mu       sync.Mutex
-	host     *linkNamespaceLease
-	route    *directRouteNetlink
-	selected selectedUplink
-	closed   bool
-	closeErr error
+	mu          sync.Mutex
+	host        *linkNamespaceLease
+	route       *directRouteNetlink
+	selected    selectedUplink
+	guestPrefix netip.Prefix
+	closed      bool
+	closeErr    error
 }
 
-func retainUplink(ctx context.Context, expected namespaceIdentity) (_ *uplinkLease, returnErr error) {
+func retainUplink(
+	ctx context.Context, expected namespaceIdentity, name linkName, gateway netip.Addr, guestPrefix netip.Prefix,
+) (_ *uplinkLease, returnErr error) {
 	namespace := newNamespaceEffect()
 	host, err := retainHostLinkNamespace(ctx, namespace.deps, namespace.policy)
 	if err != nil {
@@ -48,11 +56,11 @@ func retainUplink(ctx context.Context, expected namespaceIdentity) (_ *uplinkLea
 		return nil, networkAuthorityCorruptError("NAT uplink host namespace does not match network authority", err)
 	}
 	route := newDirectRouteNetlink()
-	selected, err := observeSelectedUplink(ctx, route, fd, identity)
+	selected, err := observeUplink(ctx, route, fd, identity, name, gateway, guestPrefix)
 	if err != nil {
 		return nil, networkAuthorityEffectError("select NAT uplink", err)
 	}
-	lease := &uplinkLease{host: host, route: route, selected: selected}
+	lease := &uplinkLease{host: host, route: route, selected: selected, guestPrefix: guestPrefix}
 	if err := lease.revalidate(ctx); err != nil {
 		return nil, err
 	}
@@ -72,7 +80,19 @@ func (lease *uplinkLease) revalidate(ctx context.Context) error {
 	if err != nil || identity != lease.selected.link.namespace {
 		return networkAuthorityCorruptError("NAT uplink namespace identity changed", err)
 	}
-	observed, err := observeSelectedUplink(ctx, lease.route, fd, identity)
+	var name linkName
+	if lease.selected.named {
+		name = lease.selected.link.name
+	}
+	observed, err := observeUplink(
+		ctx,
+		lease.route,
+		fd,
+		identity,
+		name,
+		lease.selected.requestedGateway,
+		lease.guestPrefix,
+	)
 	if err != nil {
 		return networkAuthorityEffectError("revalidate NAT uplink", err)
 	}
@@ -96,13 +116,110 @@ func (lease *uplinkLease) close(ctx context.Context) error {
 	return lease.closeErr
 }
 
+func observeUplink(
+	ctx context.Context,
+	adapter *directRouteNetlink,
+	fd int,
+	namespace namespaceIdentity,
+	name linkName,
+	gateway netip.Addr,
+	guestPrefix netip.Prefix,
+) (selectedUplink, error) {
+	if name == "" {
+		return observeSelectedUplink(ctx, adapter, fd, namespace)
+	}
+	link, err := adapter.inspectLink(ctx, fd, name)
+	if err != nil {
+		return selectedUplink{}, err
+	}
+	if link == nil || link.name != name || link.ifIndex <= 0 || link.master != 0 ||
+		link.flags&unix.IFF_LOOPBACK != 0 || link.deviceType == unix.ARPHRD_LOOPBACK ||
+		link.flags&unix.IFF_UP == 0 || isManagedUplinkLink(*link) {
+		return selectedUplink{}, fmt.Errorf("NAT uplink %q must be an up, independent host interface", name)
+	}
+	addresses, err := adapter.listIPv4Addresses(ctx, fd, link.ifIndex)
+	if err != nil {
+		return selectedUplink{}, err
+	}
+	if !slices.ContainsFunc(addresses, func(address routeAddressObservation) bool {
+		ip := address.prefix.Addr()
+		return address.scope == unix.RT_SCOPE_UNIVERSE && ip.IsGlobalUnicast() &&
+			address.flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0
+	}) {
+		return selectedUplink{}, fmt.Errorf("NAT uplink %q has no usable IPv4 address", name)
+	}
+	if slices.ContainsFunc(addresses, func(address routeAddressObservation) bool {
+		return address.prefix.Overlaps(guestPrefix)
+	}) {
+		return selectedUplink{}, fmt.Errorf("NAT uplink %q overlaps the managed guest subnet", name)
+	}
+	selected := selectedUplink{named: true, requestedGateway: gateway,
+		link: linkIdentity{name: name, ifIndex: link.ifIndex, namespace: namespace},
+		kind: link.kind, deviceType: link.deviceType, alias: link.alias, master: link.master}
+	if gateway.IsValid() {
+		if !slices.ContainsFunc(addresses, func(address routeAddressObservation) bool {
+			return address.scope == unix.RT_SCOPE_UNIVERSE &&
+				address.flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 &&
+				usableOnLinkGateway(address.prefix, gateway)
+		}) {
+			return selectedUplink{}, fmt.Errorf("NAT gateway %s is not on-link for %q", gateway, name)
+		}
+		selected.route = routeIPv4Observation{
+			destination: netip.MustParsePrefix("0.0.0.0/0"), ifIndex: link.ifIndex,
+			table: unix.RT_TABLE_MAIN, protocol: unix.RTPROT_STATIC, scope: unix.RT_SCOPE_UNIVERSE,
+			kind: unix.RTN_UNICAST, hasGateway: true, gateway: gateway,
+		}
+		return selected, nil
+	}
+	routes, err := adapter.listDefaultIPv4Routes(ctx, fd, link.ifIndex)
+	if err != nil {
+		return selectedUplink{}, err
+	}
+	for _, route := range routes {
+		if !selected.route.destination.IsValid() || route.metric < selected.route.metric ||
+			(route.metric == selected.route.metric && defaultUplinkRouteLess(route, selected.route)) {
+			selected.route = route
+		}
+	}
+	return selected, nil
+}
+
+func usableOnLinkGateway(prefix netip.Prefix, gateway netip.Addr) bool {
+	if gateway == prefix.Addr() || !prefix.Contains(gateway) {
+		return false
+	}
+	// Both addresses of a /31 are usable on a point-to-point link.
+	if prefix.Bits() >= 31 {
+		return true
+	}
+	first := prefix.Masked().Addr().As4()
+	last := binary.BigEndian.Uint32(first[:]) | (uint32(1)<<(32-prefix.Bits()) - 1)
+	var broadcast [4]byte
+	binary.BigEndian.PutUint32(broadcast[:], last)
+	return gateway != netip.AddrFrom4(first) && gateway != netip.AddrFrom4(broadcast)
+}
+
+func (uplink *selectedUplink) gatewayIntent() netip.Addr {
+	if uplink == nil {
+		return netip.Addr{}
+	}
+	return uplink.requestedGateway
+}
+
+func (uplink *selectedUplink) requestedName() linkName {
+	if uplink == nil || !uplink.named {
+		return ""
+	}
+	return uplink.link.name
+}
+
 func observeSelectedUplink(
 	ctx context.Context,
 	adapter *directRouteNetlink,
 	fd int,
 	namespace namespaceIdentity,
 ) (selectedUplink, error) {
-	routes, err := adapter.listDefaultIPv4Routes(ctx, fd)
+	routes, err := adapter.listDefaultIPv4Routes(ctx, fd, 0)
 	if err != nil {
 		return selectedUplink{}, err
 	}
@@ -176,6 +293,7 @@ func isManagedUplinkLink(link routeLinkObservation) bool {
 func (adapter *directRouteNetlink) listDefaultIPv4Routes(
 	ctx context.Context,
 	fd int,
+	ifIndex int,
 ) ([]routeIPv4Observation, error) {
 	data, err := marshalRouteMessage(
 		0,
@@ -202,14 +320,27 @@ func (adapter *directRouteNetlink) listDefaultIPv4Routes(
 		if reply.Data[0] != unix.AF_INET || reply.Data[1] != 0 || reply.Data[7] != unix.RTN_UNICAST {
 			continue
 		}
-		// Decode before filtering the table: RTA_TABLE can override the eight-bit header table.
+		table, err := ipv4RouteTable(reply.Data)
+		if err != nil {
+			return nil, err
+		}
+		if table != unix.RT_TABLE_MAIN {
+			continue
+		}
+		if ifIndex != 0 {
+			index, err := ipv4RouteOutputIndex(reply.Data)
+			if err != nil {
+				return nil, err
+			}
+			if index != uint32(ifIndex) {
+				continue
+			}
+		}
 		observation, err := decodeRouteIPv4Message(reply)
 		if err != nil {
 			return nil, err
 		}
-		if observation.table == unix.RT_TABLE_MAIN {
-			defaults = append(defaults, observation)
-		}
+		defaults = append(defaults, observation)
 	}
 	return defaults, nil
 }

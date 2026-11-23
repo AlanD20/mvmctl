@@ -3,6 +3,7 @@ package jailer
 import (
 	"context"
 
+	"mvmctl/internal/lib/authorityfs"
 	"mvmctl/internal/lib/system"
 )
 
@@ -121,14 +122,9 @@ func proveLifecyclePriorBootAbsence(
 	record instanceRecord,
 	currentBootID string,
 ) (_ *system.PriorBootVMAbsence, returnErr error) {
-	retained, err := vmLock.retainTopologyAuthority(ctx)
+	hold, err := retainLifecyclePriorBootHold(ctx, vmLock)
 	if err != nil {
 		return nil, err
-	}
-	hold, err := retained.transferProductionHold(ctx)
-	if err != nil {
-		return nil, appendInstanceOperationError(err, "release rejected prior-boot topology authority",
-			retained.Release(context.WithoutCancel(ctx)))
 	}
 	defer func() {
 		returnErr = appendInstanceOperationError(returnErr, "release prior-boot proof issuance hold",
@@ -146,6 +142,19 @@ func proveLifecyclePriorBootAbsence(
 		return nil, instanceStateError(record.vmID, "prior-boot absence was issued in another host boot")
 	}
 	return proof, nil
+}
+
+func retainLifecyclePriorBootHold(ctx context.Context, vmLock *vmAuthorityLease) (*authorityfs.TopologyHold, error) {
+	retained, err := vmLock.retainTopologyAuthority(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hold, err := retained.transferProductionHold(ctx)
+	if err != nil {
+		return nil, appendInstanceOperationError(err, "release rejected prior-boot topology authority",
+			retained.Release(context.WithoutCancel(ctx)))
+	}
+	return hold, nil
 }
 
 func (admission *lifecycleRecoveryAdmission) admit(

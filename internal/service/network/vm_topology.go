@@ -452,8 +452,17 @@ func (lease *VMTopologyLease) revalidateNetwork(ctx context.Context) error {
 	if err := inspectManagedBridgeL3(ctx, newDirectRouteNetlink(), fd, lease.network.record); err != nil {
 		return err
 	}
+	if err := verifyNamedRouting(ctx, fd, lease.network.record, true); err != nil {
+		return err
+	}
 	if lease.network.record.configuration.nat && lease.network.uplink == nil {
-		lease.network.uplink, err = retainUplink(ctx, identity)
+		lease.network.uplink, err = retainUplink(
+			ctx,
+			identity,
+			lease.network.record.configuration.uplink.requestedName(),
+			lease.network.record.configuration.uplink.gatewayIntent(),
+			lease.network.record.configuration.l3.prefix.value,
+		)
 		if err != nil {
 			return err
 		}

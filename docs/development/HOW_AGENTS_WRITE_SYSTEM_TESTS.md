@@ -307,7 +307,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `network create` duplicate name/subnet | **L2** | Real DB constraint |
 | `network create --no-nat` | **L2** | Verify no managed nftables NAT rule |
 | `network create --ipv4-gateway` | **L2** | Real bridge IP config |
-| `network create --nat-gateways` (removed) | **L2** | Reject the caller-selected uplink flag before effects |
+| `network create --uplink <interface>` | **L2** | Verify guest egress through a custom uplink and exact route and rule cleanup |
 | `network ls` / `network ls --json` | L1 | DB query + JSON |
 | `network inspect` / `--json` / `--tree` | L1 | DB query + JSON |
 | `network rm` / `network rm --force` | **L2** | Real bridge + firewall cleanup |
@@ -382,10 +382,10 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 |----------|---------|-----|
 | `bin ls --json` | L1 | DB query + JSON |
 | `bin ls --remote` / `--remote --limit` | **L2** | Real network I/O |
-| `bin pull <version>` | **L2** | Real HTTP download |
-| `bin pull <version> --force` / `--default` | **L2** | Root-authoritative release install and optional real download |
+| `bin pull TYPE[:VERSION]` | **L2** | Real HTTP download |
+| `bin pull TYPE[:VERSION] --force` / `--default` | **L2** | Root-authoritative release install and optional real download |
 | `bin pull` nonexistent | L1 | Error handling |
-| `bin rm <exact-version>...` | **L2** | Root-authoritative release removal |
+| `bin rm TYPE:EXACT_VERSION...` | **L2** | Root-authoritative release removal |
 | `bin rm` nonexistent | L1 | Error handling |
 | `bin default` / `bin default <nonexistent>` | L1 | DB update |
 | Trusted releases survive cache clean | **L2** | Root store is independent of the user cache |

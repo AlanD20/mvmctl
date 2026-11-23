@@ -157,11 +157,13 @@ Create a network for VMs to connect to.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `subnet` | `string` | **Yes** | — | Canonical masked IPv4 CIDR wholly inside RFC1918 space, prefix length at most `/30`; e.g. `"172.27.0.0/24"`. |
-| `nat_enabled` | `bool` | No | `true` | Enable NAT for internet access. |
+| `nat_enabled` | `bool` | No | `true` | Enable IPv4 NAT. |
+| `nat_uplink` | `string` | No | `auto` | Discover the default-route interface, use `none` to disable NAT, or name an existing host interface. |
+| `nat_uplink_gateway` | `string` | No | — | On-link IPv4 next hop for a named uplink. |
 | `ipv4_gateway` | `string` | No | First usable address | Canonical usable IPv4 address inside the subnet. |
 | `default` | `bool` | No | `false` | Set as default network. |
 
-Omit `nat_gateways`: it is rejected. The privileged network service selects the NAT uplink.
+For a named uplink, mvmctl manages guest egress routing. See [Network commands](REFERENCES.md#mvm-network).
 
 **Example:**
 ```yaml
@@ -205,46 +207,43 @@ owned reservation and preserves `existing` selections; active ownership must be 
 
 ### `floating_ip_grant`
 
-Store one guest method permission for an exact resource and VM incarnation. The VM must be eligible in the same
-network and operator. This step does not associate an address, start a lease loop or prove session readiness.
+Delegate guest methods on one floating IP to an explicit list of VMs in its network. Each VM and method
+pair gets its own grant for the admitted VM launch.
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `network` | `string` | Yes | — | Network selector or `@network:name`. |
-| `resource` | `string` | Yes | — | Floating-IP selector or `@floating_ip:name`. |
-| `vm` | `string` | Yes | — | VM selector or `@vm:name`. |
-| `method` | `string` | Yes | — | One of `inspect`, `associate`, `renew`, `release`. |
-| `lease` | `string` | For associate/renew | — | Positive whole-second duration, e.g. `10s` or `1m`; forbidden for inspect/release. |
-
-For an existing network `cluster` and running VM `controller-1` in that network, this spec reserves `api` and
-delegates association. Add separate grant steps for other methods the application needs:
+| Field | Type | Description |
+|-------|------|-------------|
+| `network` | `string` | Required network selector or `@network:name`. |
+| `resource` | `string` | Required floating-IP selector or `@floating_ip:name`. |
+| `vms` | `list` | One or more distinct VM selectors or `@vm:name` references. |
+| `methods` | `list` | One or more entries with a distinct `method` and a `lease` where required. |
+| `methods[].method` | `string` | One of `inspect`, `associate`, `renew`, `release`. |
+| `methods[].lease` | `string` | Required for associate and renew. Use a positive whole-second duration such as `10s`. Omit for inspect and release. |
 
 ```yaml
-version: "1"
-network:
-  cluster:
-    existing: cluster
-vm:
-  controller:
-    existing: controller-1
-floating_ip:
-  api:
-    network: "@network:cluster"
-    depends_on: ["@network:cluster"]
 floating_ip_grant:
-  controller-associate:
+  api-controllers:
     network: "@network:cluster"
     resource: "@floating_ip:api"
-    vm: "@vm:controller"
-    method: associate
-    lease: 10s
-    depends_on: ["@floating_ip:api", "@vm:controller"]
+    vms:
+      - "@vm:controller-1"
+      - "@vm:controller-2"
+    methods:
+      - method: inspect
+      - method: associate
+        lease: 10s
+    depends_on:
+      - "@floating_ip:api"
+      - "@vm:controller-1"
+      - "@vm:controller-2"
 ```
 
-The grant ID is saved before the effect. Reapply requires the exact grant lifetime; a stopped, restarted or
-restored incarnation is not silently adopted. Destroy revokes that saved grant, including after an uncertain
-creation result or VM stop. It does not revoke a different grant with matching names or permissions. There is
-no `existing` selection for grant steps.
+The workflow saves every grant ID before creation. Each VM's first receipt pins the launch for that VM's other
+methods. After an interrupted apply, retry uses the saved IDs. Destroy recovers missing receipts from root using
+those IDs and keeps the saved plan until cleanup succeeds. Delegation gives the guest permission to call a method.
+The guest must still call it to acquire or renew an address.
+
+If you applied an environment with the earlier development build's `vm`, `method`, and `lease` fields, destroy
+it with that build before switching to the batch format.
 
 ### `key`
 
@@ -552,7 +551,8 @@ Create a directional VM-to-VM execution grant for one non-root destination user.
 ```yaml
 exec_policy:
   app-maintenance:
-    source_labels: {role: app}
+    source_labels:
+      role: app
     destination_vm: "@vm:database"
     target_user: app
     depends_on: ["@vm:database"]

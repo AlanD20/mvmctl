@@ -584,14 +584,14 @@ func TestNetworkStep_StateData(t *testing.T) {
 }
 
 // --- NetworkStep.FromSpec NAT default ---
-// Rationale: The network step defaults NATEnabled to true when the "nat" key
+// Rationale: The network step defaults NATEnabled to true when the "nat_enabled" key
 // is absent from the spec. This matches the production default and prevents
 // silent network misconfiguration if the default changes.
 
 func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 	dummyOp := &api.Operation{}
 
-	t.Run("nat_key_absent_produces_nonempty_deterministic_hash", func(t *testing.T) {
+	t.Run("nat_enabled_absent_produces_nonempty_deterministic_hash", func(t *testing.T) {
 		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24"}
 		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
@@ -604,21 +604,21 @@ func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 			"identical specs must produce identical hashes")
 	})
 
-	t.Run("nat_key_false_produces_different_hash", func(t *testing.T) {
-		specTrue := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": true}
+	t.Run("nat_enabled_false_produces_different_hash", func(t *testing.T) {
+		specTrue := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat_enabled": true}
 		stepTrue, err := envpkg.Registry["network"].FromSpec("network", "test-net", specTrue, dummyOp)
 		require.NoError(t, err)
 
-		specFalse := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": false}
+		specFalse := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat_enabled": false}
 		stepFalse, err := envpkg.Registry["network"].FromSpec("network", "test-net", specFalse, dummyOp)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, stepTrue.SpecHash(), stepFalse.SpecHash(),
-			"nat=false must produce a different SpecHash than nat=true")
+			"nat_enabled=false must produce a different SpecHash than nat_enabled=true")
 	})
 
 	t.Run("spec_hash_is_deterministic", func(t *testing.T) {
-		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": true}
+		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat_enabled": true}
 		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 

@@ -222,6 +222,30 @@ func repinManagedCache(
 	return lease, nil
 }
 
+// repinPersistentManagedCache uses the on-disk cache identity when a caller
+// has already established authority independently of a previous mount ID.
+func repinPersistentManagedCache(
+	ctx context.Context,
+	deps managedCacheDeps,
+	policy managedCachePolicy,
+	caller instanceCaller,
+	locator managedCacheLocator,
+	expected protectedBackingCache,
+) (*managedCacheLease, error) {
+	lease, err := pinManagedCache(ctx, deps, policy, caller, locator)
+	if err != nil {
+		return nil, err
+	}
+	if protectedCacheIdentity(lease.identity) != expected {
+		return nil, appendManagedCacheCleanupError(
+			managedCacheAtomicError("persistent managed cache identity does not match registered authority", nil),
+			"release mismatched managed cache lease",
+			lease.Release(context.WithoutCancel(ctx)),
+		)
+	}
+	return lease, nil
+}
+
 func validateManagedCachePolicy(policy managedCachePolicy) error {
 	if !filepath.IsAbs(policy.rootPath) || filepath.Clean(policy.rootPath) != policy.rootPath ||
 		strings.ContainsRune(policy.rootPath, '\x00') {

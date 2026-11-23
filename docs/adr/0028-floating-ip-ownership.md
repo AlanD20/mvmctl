@@ -40,13 +40,19 @@ Network removal requires live reservations to be removed first; reset admits onl
 
 The registered `floating-ip-create`, `floating-ip-list`, `floating-ip-get` and `floating-ip-remove` actions use
 the existing enrolled-operator dispatch, authenticated caller UID, zero-payload framing and EOF-before-effects
-contract. `mvm floating-ip` exposes reservation create/list/inspect/removal. Forced network cleanup retires its
+contract. `mvm network floating-ip` exposes reservation create/list/inspect/removal. Forced network cleanup retires its
 reservations first; ordinary pruning retains networks with floating resources. Automatic VM primary allocation
 excludes observed floating reservations, with final root admission still refusing concurrent conflicts.
 
 The CLI allocates, inspects, associates, moves, disassociates and removes resources. Guest delegation permits
 inspection and self-association, renewal or release of an exact resource, never allocation, grant creation or
 selection of another owner. Eligible VMs must belong to the resource's network and enrolled operator.
+
+An environment grant step declares a list of exact VM selectors and a list of methods. The workflow persists
+one exact grant ID per pair before publication. After the first receipt for a VM, subsequent grants compare
+the saved boot, launch generation and execution UID under retained root admission before writing permission.
+This keeps several methods in one workflow step without creating group authority. A retry uses the original
+IDs, and teardown recovers or revokes only those grants.
 
 ### Ownership and fencing
 

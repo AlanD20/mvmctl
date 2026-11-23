@@ -432,7 +432,7 @@ def _ensure_binary(vm_name: str) -> None:
         for binary_type in ("firecracker", "jailer")
     )
     if not has:
-        _run_mvm(vm_name, "bin", "pull", "1.17.0", "--default", timeout=300)
+        _run_mvm(vm_name, "bin", "pull", "firecracker:1.17.0", "--default", timeout=300)
 
 
 def ensure_vm_deps(vm_name: str) -> None:

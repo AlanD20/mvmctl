@@ -91,12 +91,9 @@ func validateStepInput(kind, name string, spec model.ResourceMap) error {
 	}
 	switch kind {
 	case "network":
-		var in inputs.NetworkCreateInput
-		if err := decodeStepInput(spec, &in); err != nil {
+		in, err := networkInputFromSpec(name, spec)
+		if err != nil {
 			return err
-		}
-		if in.Name == "" {
-			in.Name = name
 		}
 		if !existing {
 			return in.Validate()
@@ -201,7 +198,7 @@ func validateStepInput(kind, name string, spec model.ResourceMap) error {
 	case "floating_ip", "floating_ip_grant", "volume", "traffic_policy", "exec_policy", "ready":
 		allowed := map[string]string{
 			"floating_ip":       "network name ipv4 existing",
-			"floating_ip_grant": "network resource vm method lease",
+			"floating_ip_grant": "network resource vms methods",
 			"volume":            "name size read_only shareable writeback retain existing",
 			"traffic_policy":    "source_network source_vm source_labels destination_vm destination_labels destination_host destination_floating_ip destination_network protocol port existing",
 			"exec_policy":       "source_vm source_labels destination_vm destination_labels target_user existing",
@@ -269,7 +266,7 @@ func validateSpecReferences(spec EnvSpec, steps []workflow.Step) error {
 					"image_import/source",
 					"traffic_policy/source_vm",
 					"traffic_policy/destination_vm",
-					"floating_ip_grant/vm",
+					"floating_ip_grant/vms",
 					"exec_policy/source_vm",
 					"exec_policy/destination_vm",
 					"copy/src",

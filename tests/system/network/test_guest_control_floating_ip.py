@@ -165,7 +165,7 @@ print(json.dumps({'daemon': daemons[0],
     _assert_tcp_peer(journey.runner, owner)
     assert pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip() == host_boot
     assert _grants(journey, resource) == grants
-    assert _tcp_data(journey.runner, "floating-ip", "delegation", "inspect", grant["id"],
+    assert _tcp_data(journey.runner, "network", "floating-ip", "delegation", "inspect", grant["id"],
                      "--network", network["id"]) == grant
     assert _host(journey, resource) == before
     journey.alias(owner, resource, present=True)

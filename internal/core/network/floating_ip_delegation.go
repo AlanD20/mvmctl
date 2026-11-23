@@ -11,10 +11,13 @@ import (
 
 // GrantFloatingIPDelegation returns root-persisted permission, not Guest Control readiness.
 func (service *Service) GrantFloatingIPDelegation(
-	ctx context.Context, id, networkID, resourceID, vmID, method string, duration time.Duration,
+	ctx context.Context,
+	id, networkID, resourceID, vmID, method string,
+	duration time.Duration,
+	expected *model.FloatingIPGrantIncarnation,
 ) (*model.FloatingIPDelegationItem, error) {
 	result, err := service.floating.GrantFloatingIPDelegation(ctx, networkservice.FloatingIPDelegationGrantRequest{
-		ID: id, NetworkID: networkID, ResourceID: resourceID, VMID: vmID, Method: method, LeaseDuration: duration})
+		ID: id, NetworkID: networkID, ResourceID: resourceID, VMID: vmID, Method: method, LeaseDuration: duration, Expected: expected})
 	if err != nil {
 		slog.Error("failed to store floating-IP delegation", "error", err)
 		return nil, err

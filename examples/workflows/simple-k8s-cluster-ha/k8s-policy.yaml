@@ -7,31 +7,46 @@ traffic_policy:
     protocol: tcp
     port: '6443'
   vxlan:
-    source_labels: {cluster: k8s-ha}
-    destination_labels: {cluster: k8s-ha}
+    source_labels:
+      cluster: k8s-ha
+    destination_labels:
+      cluster: k8s-ha
     protocol: udp
     port: '8472'
   cilium-health:
-    source_labels: {cluster: k8s-ha}
-    destination_labels: {cluster: k8s-ha}
+    source_labels:
+      cluster: k8s-ha
+    destination_labels:
+      cluster: k8s-ha
     protocol: tcp
     port: '4240'
   kubelet:
-    source_labels: {cluster: k8s-ha, role: controller}
-    destination_labels: {cluster: k8s-ha}
+    source_labels:
+      cluster: k8s-ha
+      role: controller
+    destination_labels:
+      cluster: k8s-ha
     protocol: tcp
     port: '10250'
   etcd:
-    source_labels: {cluster: k8s-ha, role: controller}
-    destination_labels: {cluster: k8s-ha, role: controller}
+    source_labels:
+      cluster: k8s-ha
+      role: controller
+    destination_labels:
+      cluster: k8s-ha
+      role: controller
     protocol: tcp
     port: '2379-2380'
 exec_policy:
   controller-join:
-    source_labels: {cluster: k8s-ha, joins: controller}
+    source_labels:
+      cluster: k8s-ha
+      joins: controller
     destination_vm: controller-1
     target_user: controller-reader
   worker-join:
-    source_labels: {cluster: k8s-ha, role: worker}
+    source_labels:
+      cluster: k8s-ha
+      role: worker
     destination_vm: controller-1
     target_user: worker-reader

@@ -278,7 +278,7 @@ def private_admission(sequence, kernel_module, monkeypatch, pair, *, result=None
             return success({"cache_dir": str(sequence.cache_dir)})
         if args == ("config", "ls", "--json"):
             return success({})
-        assert args == ("bin", "pull", "1.17.0", "--json")
+        assert args == ("bin", "pull", "firecracker:1.17.0", "--json")
         assert kwargs == {"timeout": 300, "check": False}
         state["inventory"] = {**empty, "bin": list(reversed(admitted))}
         if root_drift:
@@ -297,7 +297,7 @@ def test_private_pair_projection_keeps_borrowed_root_and_admits_fresh_full_rows(
     calls, admitted = private_admission(sequence, kernel_module, monkeypatch, pair)
     sequence.initialize()
     assert calls == [("cache", "init", "--json"), ("config", "ls", "--json"),
-                     ("bin", "pull", "1.17.0", "--json")]
+                     ("bin", "pull", "firecracker:1.17.0", "--json")]
     assert sequence.baseline["bin"] == list(reversed(admitted))
     assert all(not sequence.baseline[domain] for domain in sequence.domains if domain != "bin")
     proof = json.loads((sequence.output_root / "borrowed-release.admitted.json").read_text())
@@ -351,7 +351,7 @@ def test_failed_private_pair_admission_retains_native_receipts_without_adoption(
     with pytest.raises(AssertionError, match="failed official"):
         sequence.cleanup()
     assert sequence.cache_dir.exists() and sequence.config_dir.exists()
-    assert calls[-1] == ("bin", "pull", "1.17.0", "--json")
+    assert calls[-1] == ("bin", "pull", "firecracker:1.17.0", "--json")
 
 
 def test_borrowed_root_drift_prevents_terminal_cache_cleanup(

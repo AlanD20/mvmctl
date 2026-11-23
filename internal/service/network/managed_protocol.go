@@ -3,6 +3,7 @@ package network
 import (
 	"net/netip"
 
+	netlib "mvmctl/internal/lib/network"
 	"mvmctl/pkg/errs"
 )
 
@@ -13,18 +14,30 @@ const (
 	ManagedNetworkRemoveAction = "managed-network-remove"
 )
 
-// ManagedNetworkCreateRequest carries logical intent, never host device selectors.
+// ManagedNetworkCreateRequest carries logical intent. Root resolves any uplink name.
 type ManagedNetworkCreateRequest struct {
-	NetworkID string `json:"network_id"`
-	Prefix    string `json:"prefix"`
-	Gateway   string `json:"gateway"`
-	NAT       bool   `json:"nat"`
+	NetworkID     string `json:"network_id"`
+	Prefix        string `json:"prefix"`
+	Gateway       string `json:"gateway"`
+	NAT           bool   `json:"nat"`
+	Uplink        string `json:"uplink"`
+	UplinkGateway string `json:"uplink_gateway"`
 }
 
 // Validate admits only canonical immutable identifiers and resolved private IPv4 intent.
 func (request ManagedNetworkCreateRequest) Validate() error {
 	if !networkIDPattern.MatchString(request.NetworkID) {
 		return networkAuthorityValidationError("managed network requires a canonical network identifier")
+	}
+	if request.Uplink != "" && (!request.NAT || !netlib.ValidUplinkName(request.Uplink)) {
+		return networkAuthorityValidationError("managed network uplink requires NAT and a valid host interface name")
+	}
+	if request.UplinkGateway != "" {
+		if _, ok := netlib.ParseUplinkGateway(request.UplinkGateway); !ok || request.Uplink == "" {
+			return networkAuthorityValidationError(
+				"uplink gateway requires a named interface and a valid IPv4 next hop",
+			)
+		}
 	}
 	_, err := request.configuration()
 	return err
@@ -57,17 +70,20 @@ func (request ManagedNetworkRemoveRequest) Validate() error {
 
 // ManagedNetworkResult is the root-observed display projection of a successfully configured network.
 type ManagedNetworkResult struct {
-	NetworkID string `json:"network_id"`
-	Bridge    string `json:"bridge"`
-	Prefix    string `json:"prefix"`
-	Gateway   string `json:"gateway"`
-	NAT       bool   `json:"nat"`
+	NetworkID     string `json:"network_id"`
+	Bridge        string `json:"bridge"`
+	Prefix        string `json:"prefix"`
+	Gateway       string `json:"gateway"`
+	NAT           bool   `json:"nat"`
+	Uplink        string `json:"uplink"`
+	UplinkGateway string `json:"uplink_gateway"`
 }
 
 // Validate binds the acknowledgement to the exact requested logical intent.
 func (result ManagedNetworkResult) Validate(request ManagedNetworkCreateRequest) error {
 	if result.NetworkID != request.NetworkID || result.Prefix != request.Prefix || result.Gateway != request.Gateway ||
-		result.NAT != request.NAT || validateDerivedEffectLinkName(linkName(result.Bridge), "mvb") != nil {
+		result.NAT != request.NAT || result.Uplink != request.Uplink ||
+		result.UplinkGateway != request.UplinkGateway || validateDerivedEffectLinkName(linkName(result.Bridge), "mvb") != nil {
 		return errs.New(errs.CodeNetworkCreateFailed, "root network result differs from requested intent")
 	}
 	return request.Validate()

@@ -7,6 +7,7 @@ const (
 	CodeVMNotFound                 Code = "vm.not_found"
 	CodeVMAlreadyExists            Code = "vm.already_exists"
 	CodeVMStateInvalid             Code = "vm.state.invalid"
+	CodeVMResumeGuestControlFailed Code = "vm.resume.guest_control_failed"
 	CodeVMCreateFailed             Code = "vm.create.failed"
 	CodeVMBuilderFailed            Code = "vm.create.builder_failed"
 	CodeVMResolveFailed            Code = "vm.resolve.failed"

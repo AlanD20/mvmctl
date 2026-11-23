@@ -66,9 +66,9 @@ func (r *sqliteRepo) Upsert(ctx context.Context, n *model.NetworkItem) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO networks (
 			id, name, subnet, bridge, ipv4_gateway,
-			bridge_active, nat_enabled,
+			bridge_active, nat_enabled, nat_uplink, nat_uplink_gateway,
 			is_default, is_present, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			subnet = excluded.subnet,
@@ -76,12 +76,14 @@ func (r *sqliteRepo) Upsert(ctx context.Context, n *model.NetworkItem) error {
 			ipv4_gateway = excluded.ipv4_gateway,
 			bridge_active = excluded.bridge_active,
 			nat_enabled = excluded.nat_enabled,
+			nat_uplink = excluded.nat_uplink,
+			nat_uplink_gateway = excluded.nat_uplink_gateway,
 			is_default = excluded.is_default,
 			is_present = excluded.is_present,
 			updated_at = CURRENT_TIMESTAMP,
 			deleted_at = excluded.deleted_at`,
 		n.ID, n.Name, n.Subnet, n.Bridge, n.IPv4Gateway,
-		infra.BoolToInt(n.BridgeActive), infra.BoolToInt(n.NATEnabled),
+		infra.BoolToInt(n.BridgeActive), infra.BoolToInt(n.NATEnabled), n.NATUplink, n.NATUplinkGateway,
 		infra.BoolToInt(n.IsDefault), infra.BoolToInt(n.IsPresent),
 		n.CreatedAt, n.UpdatedAt, n.DeletedAt,
 	)

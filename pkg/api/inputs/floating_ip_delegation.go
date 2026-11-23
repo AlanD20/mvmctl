@@ -68,6 +68,9 @@ func (input FloatingIPDelegationInput) Validate() error {
 type FloatingIPDelegationEnsureInput struct {
 	FloatingIPDelegationGrantInput
 	ID string `json:"id"`
+
+	// Expected constrains publication to this previously observed VM launch when set.
+	Expected *model.FloatingIPGrantIncarnation `json:"expected_incarnation,omitempty"`
 }
 
 func (input FloatingIPDelegationEnsureInput) Validate() error {
@@ -79,6 +82,9 @@ func (input FloatingIPDelegationEnsureInput) Validate() error {
 			input.Resource,
 		) || !environmentPolicyVMIDPattern.MatchString(input.VM) {
 		return errs.New(errs.CodeValidationFailed, "delegation ensure requires full network, resource and VM IDs")
+	}
+	if input.Expected != nil && !input.Expected.WellFormed() {
+		return errs.New(errs.CodeValidationFailed, "expected delegation launch identity is invalid")
 	}
 	return (FloatingIPDelegationInput{ID: input.ID}).Validate()
 }

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"mvmctl/internal/lib/download"
 	libversion "mvmctl/internal/lib/version"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/errs"
 )
 
 func isDBSkipCommand(args []string) bool {
@@ -48,22 +48,14 @@ func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err err
 
 	cacheDir, err := infra.GetCacheDir()
 	if err != nil {
-		slog.Error("cannot resolve cache dir",
-			"error", err,
-		)
-		os.Exit(1)
+		return nil, nil, errs.WrapMsg(errs.CodeInternal, "cannot resolve cache directory", err)
 	}
 
 	// Check DB exists before non-exempt commands.
 	dbPath := filepath.Join(cacheDir, infra.MVMDBFilename)
 	if !isDBSkipCommand(os.Args) {
 		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-			slog.Error("not initialized",
-				"cli", infra.CLIName,
-				"command", os.Args[1],
-				"hint", fmt.Sprintf("Run '%s init' first", infra.CLIName),
-			)
-			os.Exit(1)
+			return nil, nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("run %s init first", infra.CLIName))
 		}
 	}
 
@@ -73,15 +65,13 @@ func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err err
 	if !isDBSkipCommand(os.Args) {
 		pending, err := database.GetPendingMigrations(ctx)
 		if err != nil {
-			slog.Error("failed to check pending migrations", "error", err)
-			os.Exit(1)
+			database.Close()
+			return nil, nil, errs.WrapMsg(errs.CodeInternal, "failed to check pending migrations", err)
 		}
 		if len(pending) > 0 {
-			slog.Error("pending migrations detected",
-				"count", len(pending),
-				"hint", fmt.Sprintf("Run '%s init' to apply pending migrations", infra.CLIName),
-			)
-			os.Exit(1)
+			database.Close()
+			return nil, nil, errs.New(errs.CodeValidationFailed,
+				fmt.Sprintf("pending migrations detected. Run %s init to apply them", infra.CLIName))
 		}
 	}
 

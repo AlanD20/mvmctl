@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -17,7 +18,7 @@ type entrypoints struct {
 	launchChild        func(context.Context, []string) error
 	privileged         func(context.Context, []string) error
 	systemInstall      func(context.Context, []string) error
-	hostAdministrator  func(context.Context, []string) (*app.HostAdministratorResult, error)
+	hostAdministrator  func(context.Context, app.HostAdministratorOptions) (*app.HostAdministratorResult, error)
 	normal             func() int
 }
 
@@ -82,10 +83,26 @@ func run(ctx context.Context, args []string, entries entrypoints) int {
 func runHostAdministrator(
 	ctx context.Context,
 	args []string,
-	entry func(context.Context, []string) (*app.HostAdministratorResult, error),
+	entry func(context.Context, app.HostAdministratorOptions) (*app.HostAdministratorResult, error),
 ) int {
-	common.BeginOutput(args)
-	result, err := entry(ctx, args)
+	options, err := app.ParseHostAdministrator(args)
+	common.BeginOutput(options.JSON)
+	if err == nil && options.Help {
+		if common.RecordResult(struct {
+			Text string `json:"text"`
+		}{Text: options.Usage}) {
+			if common.FinishOutput(os.Stdout, nil) != nil {
+				return 1
+			}
+		} else if _, err := fmt.Fprint(os.Stdout, options.Usage); err != nil {
+			return 1
+		}
+		return 0
+	}
+	var result *app.HostAdministratorResult
+	if err == nil {
+		result, err = entry(ctx, options)
+	}
 	if common.StructuredOutput() {
 		if result != nil && err != nil {
 			common.RecordPartialResult(result)

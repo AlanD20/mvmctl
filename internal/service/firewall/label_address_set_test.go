@@ -1,11 +1,9 @@
 package firewall
 
 import (
-	"net/netip"
 	"slices"
 	"testing"
 
-	"github.com/google/nftables"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,16 +12,13 @@ func TestLabelAddressSetUpdatePreservesUnchangedAndTimedSets(t *testing.T) {
 	intent := secondaryDurableIntent()
 	generation, err := intent.compile()
 	require.NoError(t, err)
-	endpoint := intent.Endpoints[0]
-	old, err := newLabelAddressSet(nftables.TableFamilyBridge, []EndpointBinding{endpoint})
-	require.NoError(t, err)
-	endpoint.IPv4 = netip.MustParseAddr("10.0.0.3")
-	retained, err := newLabelAddressSet(nftables.TableFamilyBridge, []EndpointBinding{endpoint, endpoint})
-	require.NoError(t, err)
+	first := testLabelAddressKey("mvma0", [4]byte{10, 0, 0, 2})
+	second := testLabelAddressKey("mvma0", [4]byte{10, 0, 0, 3})
+	third := testLabelAddressKey("mvma0", [4]byte{10, 0, 0, 4})
+	old := newLabelAddressSet([]labelAddressKey{first})
+	retained := newLabelAddressSet([]labelAddressKey{second, second})
 	require.Len(t, retained.keys, 1)
-	endpoint.IPv4 = netip.MustParseAddr("10.0.0.4")
-	added, err := newLabelAddressSet(nftables.TableFamilyBridge, []EndpointBinding{endpoint})
-	require.NoError(t, err)
+	added := newLabelAddressSet([]labelAddressKey{third})
 
 	before, target := generation.bridge, generation.bridge
 	before.labelAddressSets = sortedCopy([]labelAddressSet{old, retained}, func(set labelAddressSet) string {
@@ -52,8 +47,7 @@ func TestKernelComparisonRefusesChangedLabelSetMembership(t *testing.T) {
 	intent := secondaryDurableIntent()
 	generation, err := intent.compile()
 	require.NoError(t, err)
-	set, err := newLabelAddressSet(nftables.TableFamilyBridge, intent.Endpoints)
-	require.NoError(t, err)
+	set := newLabelAddressSet([]labelAddressKey{testLabelAddressKey("mvma0", [4]byte{10, 0, 0, 2})})
 	generation.bridge.labelAddressSets = []labelAddressSet{set}
 	observed := kernelObservationFromCompiled(generation).tables[0]
 	observed.labelAddressSets = nil

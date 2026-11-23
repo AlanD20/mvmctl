@@ -141,6 +141,44 @@ func TestPinManagedCacheRetainsDescriptorIdentity(t *testing.T) {
 	}
 }
 
+func TestRepinPersistentManagedCacheAcrossMountLifetimes(t *testing.T) {
+	fixture := prepareManagedCacheFixture(t)
+	ctx := t.Context()
+	original, err := pinManagedCache(ctx, fixture.deps, fixture.policy, fixture.caller, fixture.locator)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, original.Release(context.Background())) })
+	historical := original.identity
+	historical.mountID++
+	historical.mountIDKind = managedCacheMountIdentityUnique
+	persistent := protectedCacheIdentity(historical)
+
+	t.Run("same-boot admission rejects a different mount", func(t *testing.T) {
+		cache, err := repinManagedCache(
+			ctx, fixture.deps, fixture.policy, fixture.caller, fixture.locator, historical,
+		)
+		require.Error(t, err)
+		assert.Nil(t, cache)
+	})
+	t.Run("persistent admission pins the current mount of the same directory", func(t *testing.T) {
+		cache, err := repinPersistentManagedCache(
+			ctx, fixture.deps, fixture.policy, fixture.caller, fixture.locator, persistent,
+		)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, cache.Release(context.Background())) }()
+		assert.Equal(t, fixture.cacheInode, cache.identity.inode)
+		assert.Equal(t, original.identity.mountID, cache.identity.mountID)
+	})
+	t.Run("persistent admission rejects a different directory identity", func(t *testing.T) {
+		different := persistent
+		different.Inode++
+		cache, err := repinPersistentManagedCache(
+			ctx, fixture.deps, fixture.policy, fixture.caller, fixture.locator, different,
+		)
+		require.Error(t, err)
+		assert.Nil(t, cache)
+	})
+}
+
 func TestManagedCacheDescriptorSurvivesLocatorReplacement(t *testing.T) {
 	t.Parallel()
 	// Rationale: The invoking user can rename its cache path after root validates it. The retained descriptor

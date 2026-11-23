@@ -77,15 +77,13 @@ func newLabelTrafficPolicyListCmd(policyAPI api.LabelTrafficPolicyAPI) *cobra.Co
 			}
 			rows := make([]trafficPolicyRow, 0, len(policies))
 			for _, policy := range policies {
-				port := fmt.Sprint(policy.DestinationPortStart)
-				if policy.DestinationPortStart != policy.DestinationPortEnd {
-					port = fmt.Sprintf("%d-%d", policy.DestinationPortStart, policy.DestinationPortEnd)
-				}
+
 				rows = append(rows, trafficPolicyRow{
 					id: policy.ID, sourceKind: "vm", source: formatPolicySelector(policy.Source),
 					destination: formatPolicySelector(
 						policy.Destination,
-					), protocol: string(policy.Protocol), port: port,
+					), protocol: string(policy.Protocol),
+					port: trafficPolicyPorts(int(policy.DestinationPortStart), int(policy.DestinationPortEnd)),
 				})
 			}
 			common.RenderListing(rows, trafficPolicyColumns, "short")

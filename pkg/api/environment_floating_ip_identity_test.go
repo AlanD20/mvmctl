@@ -48,10 +48,14 @@ func (authority *floatingIPIdentityAuthority) CreateFloatingIP(
 	return &model.FloatingIPItem{ID: id, NetworkID: networkID, Name: name, IPv4: address}, nil
 }
 
-func (authority *floatingIPIdentityAuthority) GrantFloatingIPDelegation(_ context.Context,
-	id, networkID, resourceID, vmID, method string, duration time.Duration) (*model.FloatingIPDelegationItem, error) {
+func (authority *floatingIPIdentityAuthority) GrantFloatingIPDelegation(
+	_ context.Context,
+	id, networkID, resourceID, vmID, method string,
+	duration time.Duration,
+	expected *model.FloatingIPGrantIncarnation,
+) (*model.FloatingIPDelegationItem, error) {
 	authority.grants = append(authority.grants, networkservice.FloatingIPDelegationGrantRequest{
-		ID: id, NetworkID: networkID, ResourceID: resourceID, VMID: vmID, Method: method, LeaseDuration: duration})
+		ID: id, NetworkID: networkID, ResourceID: resourceID, VMID: vmID, Method: method, LeaseDuration: duration, Expected: expected})
 	for _, item := range authority.resources {
 		if item.ID == resourceID && item.NetworkID == networkID {
 			return &model.FloatingIPDelegationItem{ID: id, NetworkID: networkID, ResourceID: resourceID, VMID: vmID,

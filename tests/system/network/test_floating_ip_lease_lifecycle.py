@@ -101,7 +101,7 @@ def test_stop_start_retires_old_grants_and_requires_current_incarnation(floating
     _run_mvm(journey.runner, "vm", "stop", owner["binding"]["id"], "--force", timeout=120)
     assert _tcp_data(journey.runner, "vm", "inspect", owner["binding"]["id"])["vm"]["status"] == "stopped"
     for grant in grants:
-        retired = _tcp_data(journey.runner, "floating-ip", "delegation", "inspect", grant["id"],
+        retired = _tcp_data(journey.runner, "network", "floating-ip", "delegation", "inspect", grant["id"],
                             "--network", network["id"])
         assert retired["state"] == "revoked" and retired["revision"] > grant["revision"], retired
     _run_mvm(journey.runner, "vm", "start", owner["binding"]["id"], timeout=120)
@@ -139,8 +139,8 @@ def test_pause_expiry_does_not_resume_or_renew_implicitly(floating_journey):
     try:
         # These read operations must never unpause the VM, renew ownership, or
         # manufacture a new launch to make the guest available.
-        _tcp_data(journey.runner, "floating-ip", "inspect", resource["id"], "--network", resource["network_id"])
-        _tcp_data(journey.runner, "floating-ip", "delegation", "ls", resource["id"],
+        _tcp_data(journey.runner, "network", "floating-ip", "inspect", resource["id"], "--network", resource["network_id"])
+        _tcp_data(journey.runner, "network", "floating-ip", "delegation", "ls", resource["id"],
                   "--network", resource["network_id"], kind=list)
         _wait_past(associated_returned + 12 + 0.25)
         matches = [item for item in _tcp_data(journey.runner, "vm", "ls", kind=list)
