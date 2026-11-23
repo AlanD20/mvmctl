@@ -207,42 +207,6 @@ func (lease *protectedBackingLease) openInitialVolumeQuarantine(
 	return fd, nil
 }
 
-func (cache *managedCacheLease) restoreProtectedVMRootfs(
-	ctx context.Context, vmID vmResourceID, sourceFD int, size uint64,
-) (*protectedBackingLease, error) {
-	if size < managedVMRootfsMinBytes || size > managedVMRootfsMaxBytes {
-		return nil, managedVMResourceValidationError("restored rootfs length is outside policy")
-	}
-	return restoreProtectedBacking(ctx, cache, protectedBackingRootfs, string(vmID), sourceFD, size)
-}
-
-func (cache *managedCacheLease) restoreProtectedVMVolume(
-	ctx context.Context, spec vmVolumeResourceSpec, sourceFD int,
-) (*protectedBackingLease, error) {
-	if err := validateVMVolumeResourceSpec(spec); err != nil {
-		return nil, err
-	}
-	return restoreProtectedBacking(ctx, cache, protectedBackingVolume, string(spec.id), sourceFD, spec.expectedBytes)
-}
-
-func (cache *managedCacheLease) restoreProtectedVMKernel(
-	ctx context.Context, kernelID kernelResourceID, sourceFD int, size uint64,
-) (*protectedBackingLease, error) {
-	if size < managedVMKernelMinBytes || size > managedVMKernelMaxBytes {
-		return nil, managedVMResourceValidationError("restored kernel length is outside policy")
-	}
-	return restoreProtectedBacking(ctx, cache, protectedBackingKernel, string(kernelID), sourceFD, size)
-}
-
-func (cache *managedCacheLease) restoreProtectedVMCloudInit(
-	ctx context.Context, vmID vmResourceID, sourceFD int, size uint64,
-) (*protectedBackingLease, error) {
-	if size < managedVMCloudInitMinBytes || size > managedVMCloudInitMaxBytes {
-		return nil, managedVMResourceValidationError("restored cloud-init length is outside policy")
-	}
-	return restoreProtectedBacking(ctx, cache, protectedBackingCloudInit, string(vmID), sourceFD, size)
-}
-
 func restoreProtectedBacking(
 	ctx context.Context, cache *managedCacheLease, kind, id string, sourceFD int, size uint64,
 ) (*protectedBackingLease, error) {

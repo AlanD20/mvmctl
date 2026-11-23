@@ -48,7 +48,6 @@ type Operation struct {
 	AuditLog        *logging.AuditLog
 
 	hostSystemBinaryInstaller hostSystemBinaryInstaller
-	hostSudoersConfigurer     hostSudoersConfigurer
 	hostPolicyObserver        hostPolicyObserver
 	trustedReleaseClient      trustedReleaseClient
 	consoleClient             consoleAuthorityClient
@@ -125,10 +124,6 @@ type trafficPolicyClient interface {
 
 type hostSystemBinaryInstaller interface {
 	InstallSystemBinary(ctx context.Context) (bool, error)
-}
-
-type hostSudoersConfigurer interface {
-	ConfigureSudoers(ctx context.Context) (bool, error)
 }
 
 type hostPolicyObserver interface {
@@ -250,7 +245,6 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		ProvisionerType:           provisionerType,
 		AuditLog:                  logging.NewAuditLog(ctx),
 		hostSystemBinaryInstaller: s.Host,
-		hostSudoersConfigurer:     s.Host,
 		hostPolicyObserver:        policyObserver,
 		trustedReleaseClient:      jailer.NewTrustedReleaseClient(),
 		trafficPolicyClient:       networkservice.NewTrafficPolicyClient(),

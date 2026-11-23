@@ -110,7 +110,7 @@ PTY output is written to the log file on a best-effort basis. A failed log write
 | `internal/service/console/client.go` | CLI client attach, `InteractiveAttach()`, detach detection |
 | `internal/service/console/relay.go` | Relay process management, PID tracking, `Stop()` |
 | `internal/service/console/spawn.go` | Older `SpawnService()` adapter; not the managed launch entry |
-| `internal/core/console/controller.go` | Console controller helpers; managed launch uses the root lifecycle boundary |
+| `internal/service/jailer/lifecycle_console.go` | Typed root operations for managed console lifecycle |
 | `internal/cli/console.go` | Cobra command for `mvm console` |
 | `pkg/api/console.go` | API orchestration for console relay lifecycle |
 

@@ -22,7 +22,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/pool"
 	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/download"
@@ -762,45 +761,6 @@ func specFromVersion(v model.VersionInfo, arch string) *model.ImageSpec {
 		Format:  v.Format,
 		Arch:    arch,
 	}
-}
-
-// ResolveRemoteSizes resolves remote image sizes via concurrent HEAD requests.
-// Uses download.Downloader.HeadSize (which includes retry + cache).
-func (s *Service) ResolveRemoteSizes(
-	ctx context.Context,
-	specs []*model.ImageSpec,
-	ciVersion string,
-) []*model.ImageSpec {
-	_ = pool.Do(ctx, 5, specs, func(_ context.Context, sp *model.ImageSpec) error {
-		templateVars := s.getTemplateVariables(sp, ciVersion)
-		source := sp.Source
-		if sp.ListURLTemplate != nil && *sp.ListURLTemplate != "" {
-			// Dynamic image: resolve source template first
-			var err error
-			source, err = s.resolveSourceTemplate(ctx, sp, templateVars)
-			if err != nil {
-				return nil // catch all → return without setting size
-			}
-		} else if strings.Contains(sp.Source, "{") {
-			// Static image with template: resolve variables
-			if r, err := infra.RenderTemplate(sp.Source, templateVars); err == nil {
-				source = r
-			}
-		}
-
-		// HEAD request with retry + cache
-		size, ok := s.dl.HeadSize(ctx, download.RequestOpts{
-			URL: source, Timeout: 10,
-			UseCache: true, CacheTTLSeconds: 300,
-		})
-		if ok && size >= 0 {
-			sp.Size = &size
-		}
-		// Silently skip on any error — just return without setting size
-		return nil
-	})
-
-	return specs
 }
 
 // compress compresses the image using in-process zstd library.

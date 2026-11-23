@@ -593,7 +593,7 @@ func (op *Operation) vmBuilderExecute(
 			return
 		}
 		spawner := vm.NewFirecrackerSpawner(fcConfig)
-		builder.fcManager = fcConfig
+
 		if err := spawner.WriteToFile(); err != nil {
 			fcErr = fmt.Errorf("write firecracker config: %w", err)
 			return
@@ -1446,17 +1446,17 @@ func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.B
 
 // --- Builder ---
 type VMCreateBuilder struct {
-	cacheRoot        string
-	name             string
-	vmID             string
-	vmDir            string
-	guestIP          string
-	guestMAC         string
-	tapName          string
-	rootfsPath       string
-	onProgress       event.OnProgressCallback
-	resolved         *inputs.ResolvedVMCreateInput
-	fcManager        *model.FirecrackerConfig
+	cacheRoot  string
+	name       string
+	vmID       string
+	vmDir      string
+	guestIP    string
+	guestMAC   string
+	tapName    string
+	rootfsPath string
+	onProgress event.OnProgressCallback
+	resolved   *inputs.ResolvedVMCreateInput
+
 	spawner          *vm.FirecrackerSpawner
 	cloudInitResult  *cloudInitResult
 	resourcesCreated map[string]bool

@@ -346,11 +346,6 @@ def unique_key_name() -> str:
     return f"sys-key-{uuid.uuid4().hex[:6]}"
 
 
-@pytest.fixture
-def unique_volume_name() -> str:
-    return f"sys-vol-{uuid.uuid4().hex[:6]}"
-
-
 # ============================================================================
 # Utility functions
 # ============================================================================
@@ -520,20 +515,6 @@ def cleanup_vm_resources(
 
 
 @pytest.fixture
-def minimal_vm(
-    runner_vm, unique_vm_name, unique_network_name
-) -> Generator[dict[str, Any], None, None]:
-    """Bare VM: no SSH, no console. Fastest creation. Self-contained deps."""
-    vm_name = unique_vm_name
-    net_name = unique_network_name
-    vm_info = create_vm_core(vm_name, net_name)
-    try:
-        yield vm_info
-    finally:
-        cleanup_vm_resources(vm_name, net_name)
-
-
-@pytest.fixture
 def created_vm(
     runner_vm, unique_vm_name
 ) -> Generator[dict[str, Any], None, None]:
@@ -552,44 +533,6 @@ def created_vm(
         yield vm_info
     finally:
         cleanup_vm_resources(vm_name, net_name, key_name)
-
-
-@pytest.fixture(scope="module")
-def module_vm(runner_vm) -> Generator[dict[str, Any], None, None]:
-    """Module-scoped VM with SSH key. Shared across a module for read-only tests."""
-    vm_name = f"sys-modvm-{uuid.uuid4().hex[:8]}"
-    key_name = f"sys-modvm-key-{uuid.uuid4().hex[:6]}"
-    net_name = f"sys-modvm-net-{uuid.uuid4().hex[:6]}"
-
-    _run_mvm(runner_vm, "key", "create", key_name, "--algorithm",
-             "ed25519", timeout=30)
-    try:
-        _ensure_image(runner_vm, "alpine:3.23")
-        vm_info = create_vm_core(vm_name, net_name, ssh_key_name=key_name, image="alpine:3.23",
-                                 extra_args=["--user", "root"])
-        assert wait_for_ssh(runner_vm, vm_name, "root", timeout=120)
-        yield vm_info
-    finally:
-        cleanup_vm_resources(vm_name, net_name, key_name)
-
-
-@pytest.fixture(scope="module")
-def module_network(runner_vm) -> Generator[str, None, None]:
-    """Module-scoped network for read-only tests."""
-    name = f"sys-modnet-{uuid.uuid4().hex[:6]}"
-    subnet = _unique_subnet(name)
-    _run_mvm(runner_vm, "network", "create", name, "--subnet", subnet,
-             timeout=30)
-    try:
-        yield name
-    finally:
-        _run_mvm(runner_vm, "network", "rm", name, check=False)
-        result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
-        if result.returncode == 0:
-            nets = _json_success_data(result.stdout, list)
-            if not any(n.get("is_default") for n in nets) and nets:
-                _run_mvm(runner_vm, "network", "default", nets[0]["name"],
-                         check=False)
 
 
 @pytest.fixture

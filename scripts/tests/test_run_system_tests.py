@@ -3987,16 +3987,21 @@ def test_build_base_image_refuses_ambiguous_or_invalid_image_identity(
 
 @pytest.mark.parametrize("enveloped", [False, True], ids=["legacy", "schema-1"])
 @pytest.mark.parametrize("path", ["/cache/volumes/asset-mirror.raw", None, "", 7])
-def test_inspect_volume_path_decodes_controller_response(
+def test_inspect_shared_volume_decodes_controller_response(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     enveloped: bool,
     path: object,
 ) -> None:
-    volume = {"status": "available"}
+    volume_id = "a" * 64
+    volume = {
+        "name": orchestrator.SHARED_VOLUME_NAME, "id": volume_id,
+        "format": "raw", "is_read_only": True,
+    }
     if path is not None:
         volume["path"] = path
-    info = {"volume": volume, "attachment": {}, "disk_info": {}, "timestamps": {}}
+    disk = {"volume_id": volume_id, "protected": False, "logical_bytes": 1024} if enveloped else {}
+    info = {"volume": volume, "attachment": {}, "disk_info": disk, "timestamps": {}}
     response = (
         {"schema_version": 1, "status": "success", "data": info, "error": None}
         if enveloped
@@ -4010,13 +4015,19 @@ def test_inspect_volume_path_decodes_controller_response(
 
     monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
 
-    assert orchestrator._inspect_volume_path("asset-mirror") == (
-        True,
-        path if isinstance(path, str) and path else None,
-    )
+    if enveloped and not (isinstance(path, str) and path):
+        with pytest.raises(orchestrator._UnsafeVolumeBackingPath, match="has no source path"):
+            orchestrator._inspect_shared_volume()
+    else:
+        assert orchestrator._inspect_shared_volume() == (
+            True,
+            path if isinstance(path, str) and path else None,
+            volume_id if enveloped else None,
+            False,
+        )
     assert calls == [
         (
-            ("volume", "inspect", "asset-mirror", "--json"),
+            ("volume", "inspect", orchestrator.SHARED_VOLUME_NAME, "--json"),
             {"check": False, "timeout": 30},
         )
     ]
@@ -4064,7 +4075,7 @@ def test_inspect_volume_path_decodes_controller_response(
         ),
     ],
 )
-def test_inspect_volume_path_rejects_malformed_controller_response(
+def test_inspect_shared_volume_rejects_malformed_controller_response(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     response: str,
@@ -4076,8 +4087,8 @@ def test_inspect_volume_path_rejects_malformed_controller_response(
         lambda *args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout=response),
     )
 
-    with pytest.raises(RuntimeError, match=expected_error):
-        orchestrator._inspect_volume_path("asset-mirror")
+    with pytest.raises(orchestrator._UnsafeVolumeBackingPath, match=expected_error):
+        orchestrator._inspect_shared_volume()
 
 
 @pytest.mark.parametrize(

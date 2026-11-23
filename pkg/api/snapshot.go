@@ -334,30 +334,15 @@ func (op *Operation) SnapshotRestore(
 	return []*model.VMItem{item}, nil
 }
 
-type managedSnapshotArtifacts struct {
-	dir    string
-	rootfs string
-	memory string
-	state  string
-}
-
-// resolveManagedSnapshotArtifacts derives the closed snapshot layout from the
-// trusted cache root and snapshot identity. Stored file paths are descriptive
-// metadata and cannot select restore inputs.
-func resolveManagedSnapshotArtifacts(cacheDir, snapshotID string) (*managedSnapshotArtifacts, error) {
+// validateManagedSnapshotID admits an exact identity for typed root snapshot operations.
+func validateManagedSnapshotID(snapshotID string) error {
 	if len(snapshotID) != 64 || snapshotID != strings.ToLower(snapshotID) {
-		return nil, fmt.Errorf("invalid snapshot identity")
+		return fmt.Errorf("invalid snapshot identity")
 	}
 	if _, err := hex.DecodeString(snapshotID); err != nil {
-		return nil, fmt.Errorf("invalid snapshot identity: %w", err)
+		return fmt.Errorf("invalid snapshot identity: %w", err)
 	}
-	dir := filepath.Join(cacheDir, "snapshots", snapshotID)
-	return &managedSnapshotArtifacts{
-		dir:    dir,
-		rootfs: filepath.Join(dir, infra.SnapshotRootfsFilename),
-		memory: filepath.Join(dir, infra.SnapshotMemoryFilename),
-		state:  filepath.Join(dir, infra.SnapshotStateFilename),
-	}, nil
+	return nil
 }
 
 // --- SnapshotList ---
@@ -389,7 +374,7 @@ func (op *Operation) SnapshotInspect(
 		if len(input.Identifiers) != 1 {
 			return nil, err
 		}
-		if _, identityErr := resolveManagedSnapshotArtifacts(op.CacheDir, input.Identifiers[0]); identityErr != nil {
+		if identityErr := validateManagedSnapshotID(input.Identifiers[0]); identityErr != nil {
 			return nil, err
 		}
 		projection, rootErr := jailersvc.NewVMSnapshotClient().Inspect(ctx, jailersvc.VMSnapshotRequest{
@@ -442,7 +427,7 @@ func (op *Operation) SnapshotRemove(ctx context.Context, input inputs.SnapshotIn
 	// Canonical IDs remain removable after root publication or staging succeeded but
 	// local bookkeeping failed. Root still authenticates the exact protected entry.
 	for _, identifier := range input.Identifiers {
-		if _, err := resolveManagedSnapshotArtifacts(op.CacheDir, identifier); err != nil {
+		if err := validateManagedSnapshotID(identifier); err != nil {
 			continue
 		}
 		found := false

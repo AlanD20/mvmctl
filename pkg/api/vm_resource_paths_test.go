@@ -196,29 +196,18 @@ func TestLoadedRelaunchStateProducesJailedVsockConfig(t *testing.T) {
 	assert.Equal(t, "/vmm-runtime/vsock.sock", firecrackerConfig.Vsock.UDSPath)
 }
 
-// Rationale: user-owned snapshot metadata must not select an artifact path;
-// exact leaves are derived from the validated snapshot identity.
-func TestResolveManagedSnapshotArtifacts(t *testing.T) {
-	cacheDir := t.TempDir()
-	snapshotID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-
-	paths, err := resolveManagedSnapshotArtifacts(cacheDir, snapshotID)
-	require.NoError(t, err)
-
-	wantDir := filepath.Join(cacheDir, "snapshots", snapshotID)
-	assert.Equal(t, wantDir, paths.dir)
-	assert.Equal(t, filepath.Join(wantDir, infra.SnapshotRootfsFilename), paths.rootfs)
-	assert.Equal(t, filepath.Join(wantDir, infra.SnapshotMemoryFilename), paths.memory)
-	assert.Equal(t, filepath.Join(wantDir, infra.SnapshotStateFilename), paths.state)
+// Root fallback operations require a canonical identity rather than a caller path.
+func TestValidateManagedSnapshotID(t *testing.T) {
+	require.NoError(t, validateManagedSnapshotID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
 }
 
-func TestResolveManagedSnapshotArtifactsRejectsInvalidIdentity(t *testing.T) {
+func TestValidateManagedSnapshotIDRejectsInvalidIdentity(t *testing.T) {
 	for name, snapshotID := range map[string]string{
 		"path traversal": "../selected-by-database",
 		"uppercase hex":  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := resolveManagedSnapshotArtifacts(t.TempDir(), snapshotID)
+			err := validateManagedSnapshotID(snapshotID)
 			require.ErrorContains(t, err, "invalid snapshot identity")
 		})
 	}
