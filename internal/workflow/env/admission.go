@@ -91,12 +91,9 @@ func validateStepInput(kind, name string, spec model.ResourceMap) error {
 	}
 	switch kind {
 	case "network":
-		var in inputs.NetworkCreateInput
-		if err := decodeStepInput(spec, &in); err != nil {
+		in, err := networkInputFromSpec(name, spec)
+		if err != nil {
 			return err
-		}
-		if in.Name == "" {
-			in.Name = name
 		}
 		if !existing {
 			return in.Validate()

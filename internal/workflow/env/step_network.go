@@ -233,41 +233,13 @@ func newNetworkStepFromSpec(
 	if op == nil {
 		return nil, errors.New("operation not initialized")
 	}
-	if _, exists := spec["nat_gateways"]; exists {
-		return nil, errors.New("network nat_gateways is unsupported; use nat_uplink")
-	}
-
-	data, err := yaml.Marshal(spec)
+	input, err := networkInputFromSpec(name, spec)
 	if err != nil {
 		return nil, err
 	}
-
-	var input inputs.NetworkCreateInput
-	if err := yaml.Unmarshal(data, &input); err != nil {
+	data, err := yaml.Marshal(spec)
+	if err != nil {
 		return nil, err
-	}
-	// Resource name: spec "name" overrides step name.
-	if input.Name == "" {
-		input.Name = name
-	}
-
-	input.NATEnabled = true
-	if _, exists := spec["nat_enabled"]; exists {
-		input.NATEnabled = spec.GetBool("nat_enabled")
-	}
-
-	switch input.NATUplink {
-	case "auto":
-		if !input.NATEnabled {
-			return nil, errors.New("network nat_uplink auto requires NAT")
-		}
-		input.NATUplink = ""
-	case "none":
-		if _, exists := spec["nat_enabled"]; exists && input.NATEnabled {
-			return nil, errors.New("network nat_uplink none conflicts with nat_enabled true")
-		}
-		input.NATEnabled = false
-		input.NATUplink = ""
 	}
 
 	return &NetworkStep{
@@ -280,6 +252,34 @@ func newNetworkStepFromSpec(
 		inputSpec: spec,
 		op:        op,
 	}, nil
+}
+
+func networkInputFromSpec(name string, spec model.ResourceMap) (inputs.NetworkCreateInput, error) {
+	var input inputs.NetworkCreateInput
+	if err := decodeStepInput(spec, &input); err != nil {
+		return input, err
+	}
+	if input.Name == "" {
+		input.Name = name
+	}
+	_, natSpecified := spec["nat_enabled"]
+	if !natSpecified {
+		input.NATEnabled = true
+	}
+	switch input.NATUplink {
+	case "auto":
+		if !input.NATEnabled {
+			return input, errors.New("network nat_uplink auto requires NAT")
+		}
+		input.NATUplink = ""
+	case "none":
+		if natSpecified && input.NATEnabled {
+			return input, errors.New("network nat_uplink none conflicts with nat_enabled true")
+		}
+		input.NATEnabled = false
+		input.NATUplink = ""
+	}
+	return input, nil
 }
 
 func newNetworkStepFromState(

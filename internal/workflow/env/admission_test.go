@@ -74,3 +74,38 @@ func TestApplyRejectsInvalidGraphBeforeEffects(t *testing.T) {
 		})
 	}
 }
+
+// Admission and step creation must agree about the implicit NAT default and reserved uplink values.
+func TestNetworkUplinkAdmission(t *testing.T) {
+	for name, tc := range map[string]struct {
+		uplink      string
+		nat         any
+		wantEnabled bool
+		wantName    string
+		wantError   string
+	}{
+		"named implies NAT":       {uplink: "br-lab", wantEnabled: true, wantName: "br-lab"},
+		"auto implies NAT":        {uplink: "auto", wantEnabled: true},
+		"none disables NAT":       {uplink: "none"},
+		"named with NAT disabled": {uplink: "br-lab", nat: false, wantError: "named NAT uplink requires NAT"},
+		"none with NAT enabled":   {uplink: "none", nat: true, wantError: "conflicts with nat_enabled"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			spec := model.ResourceMap{"subnet": "10.82.0.0/24", "nat_uplink": tc.uplink}
+			if tc.nat != nil {
+				spec["nat_enabled"] = tc.nat
+			}
+			err := validateStepInput("network", "private", spec)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			step, err := newNetworkStepFromSpec("network", "private", spec, &testutil.MockOperation{})
+			require.NoError(t, err)
+			input := step.(*NetworkStep).input
+			assert.Equal(t, tc.wantEnabled, input.NATEnabled)
+			assert.Equal(t, tc.wantName, input.NATUplink)
+		})
+	}
+}
