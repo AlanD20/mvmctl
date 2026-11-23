@@ -289,6 +289,8 @@ class NetworkCase:
         name: str | None = None,
         subnet: str | None = None,
         nat: bool = True,
+        uplink: str | None = None,
+        uplink_gateway: str | None = None,
         gateway: str | None = None,
         default: bool = False,
     ) -> NetworkReceipt:
@@ -303,8 +305,12 @@ class NetworkCase:
             prefix.overlaps(ipaddress.ip_network(item["subnet"])) for item in before
         ), before
         args = ["network", "create", name, "--subnet", subnet]
-        if not nat:
+        if uplink is not None:
+            args.extend(["--uplink", uplink])
+        elif not nat:
             args.append("--no-nat")
+        if uplink_gateway:
+            args.extend(["--uplink-gateway", uplink_gateway])
         if gateway:
             args.extend(["--ipv4-gateway", gateway])
         if default:
@@ -408,7 +414,7 @@ class NetworkCase:
         return kernel_id
 
     def create_vm(
-        self, network: NetworkReceipt, *, use_default: bool = False
+        self, network: NetworkReceipt, *, use_default: bool = False, require_nondefault_image: bool = True
     ) -> VMReceipt:
         # Read-only admission: no helper may pull assets or alter defaults/settings.
         assert (
@@ -441,9 +447,9 @@ class NetworkCase:
             and item["version"] == "3.23"
             and item["is_present"]
         ]
-        assert len(images) == 1 and not images[0]["is_default"], (
-            "preseed nondefault Alpine 3.23"
-        )
+        assert len(images) == 1, "preseed Alpine 3.23"
+        if require_nondefault_image:
+            assert not images[0]["is_default"], "preseed nondefault Alpine 3.23"
         _assert_network_receipt(self.runner_vm, network)
         name = f"sys-network-vm-{uuid.uuid4().hex}"
         vms_before = _data(self.runner_vm, "vm", "ls", kind=list)
@@ -714,6 +720,117 @@ def _assert_rejected(
     return envelope["error"]
 
 
+@pytest.fixture
+def private_uplink(runner_vm):
+    suffix = uuid.uuid4().hex[:7]
+    namespace = f"qa-uplink-{suffix}"
+    bridge = f"qabr{suffix}"
+    port = f"qaport{suffix}"
+
+    def ip(*args, check=True):
+        return _guest_run(runner_vm, shlex.join(["sudo", "-n", "ip", *args]), check=check)
+
+    ip("netns", "add", namespace)
+    bridge_created = False
+    try:
+        ip("link", "add", bridge, "type", "bridge")
+        bridge_created = True
+        ip("link", "add", port, "type", "veth", "peer", "name", "eth0", "netns", namespace)
+        ip("link", "set", port, "master", bridge)
+        ip("link", "set", port, "up")
+        ip("link", "set", bridge, "up")
+        ip("addr", "add", "198.19.231.1/24", "dev", bridge)
+        ip("-n", namespace, "addr", "add", "198.19.231.2/24", "dev", "eth0")
+        ip("-n", namespace, "addr", "add", "203.0.113.213/32", "dev", "lo")
+        ip("-n", namespace, "link", "set", "lo", "up")
+        ip("-n", namespace, "link", "set", "eth0", "up")
+        yield bridge
+    finally:
+        try:
+            ip("netns", "del", namespace)
+        finally:
+            if bridge_created:
+                ip("link", "del", bridge)
+
+
+def _ipv4_rules(runner_vm):
+    return json.loads(_guest_run(runner_vm, "ip -j -4 rule show").stdout)
+
+
+def test_named_nat_uplink_routes_guest_and_cleans_up(private_uplink, network_case):
+    runner = network_case.runner_vm
+    target = "203.0.113.213"
+    own_before = _guest_run(runner, f"ip -j -4 route get {target}").stdout
+    rules_before = _ipv4_rules(runner)
+
+    network = network_case.create_network(
+        uplink=private_uplink, uplink_gateway="198.19.231.2",
+    )
+    inspected = _data(runner, "network", "inspect", network.id)
+    assert inspected["nat"] == {
+        "nat_enabled": True, "nat_uplink": private_uplink, "nat_uplink_gateway": "198.19.231.2",
+    }
+    assert _guest_run(runner, f"ip -j -4 route get {target}").stdout == own_before
+
+    vm = network_case.create_vm(network, require_nondefault_image=False)
+    route = json.loads(_guest_run(
+        runner, f"sudo -n ip -j -4 route get {target} from {vm.ipv4} iif {network.bridge}",
+    ).stdout)
+    assert len(route) == 1 and route[0]["dev"] == private_uplink, route
+    ping = _run_mvm(runner, "exec", vm.id, "--", f"ping -c 1 -W 3 {target}", timeout=30)
+    assert "1 packets received" in ping.stdout or "1 received" in ping.stdout, ping.stdout
+    network_case.remove_vm(vm)
+    network_case.remove_network(network)
+    assert _ipv4_rules(runner) == rules_before
+
+
+def test_named_nat_uplink_without_next_hop_keeps_direct_access(private_uplink, network_case):
+    runner = network_case.runner_vm
+    rules_before = _ipv4_rules(runner)
+    network = network_case.create_network(uplink=private_uplink)
+    source = str(ipaddress.ip_network(network.subnet).network_address + 2)
+    direct = _guest_run(
+        runner, f"sudo -n ip -j -4 route get 198.19.231.2 from {source} iif {network.bridge}",
+    )
+    assert json.loads(direct.stdout)[0]["dev"] == private_uplink, direct.stdout
+    remote = _guest_run(
+        runner, f"sudo -n ip -4 route get 203.0.113.213 from {source} iif {network.bridge}",
+        check=False,
+    )
+    assert remote.returncode != 0 and "Network is unreachable" in remote.stderr, remote
+    network_case.remove_network(network)
+    assert _ipv4_rules(runner) == rules_before
+
+
+def test_named_nat_uplink_refuses_conflicting_host_rule(private_uplink, network_case):
+    runner = network_case.runner_vm
+    name = f"sys-uplink-conflict-{uuid.uuid4().hex[:8]}"
+    subnet = _unique_subnet(name)
+    rule = f"priority 1 from {subnet} unreachable"
+    network_case.attempts.append(("network", name))
+
+    _guest_run(runner, f"sudo -n ip -4 rule add {rule}")
+    try:
+        before = _ipv4_rules(runner)
+        attempt = _run_mvm(
+            runner, "network", "create", name, "--subnet", subnet, "--uplink", private_uplink,
+            "--json", check=False,
+        )
+        assert attempt.returncode != 0, attempt.stdout
+        result = json.loads(attempt.stdout)
+        assert "foreign IPv4 policy rule" in json.dumps(result["error"]), result
+        assert _ipv4_rules(runner) == before
+        pending = [item for item in _networks(runner) if item["name"] == name]
+        assert len(pending) == 1 and not pending[0]["is_present"] and not pending[0]["bridge"], pending
+    finally:
+        _guest_run(runner, f"sudo -n ip -4 rule del {rule}")
+        pending = [item for item in _networks(runner) if item["name"] == name]
+        if pending:
+            assert len(pending) == 1 and pending[0]["subnet"] == subnet, pending
+            assert not pending[0]["is_present"] and not pending[0]["bridge"], pending
+            _run_mvm(runner, "network", "rm", pending[0]["id"], "--force")
+
+
 class TestNetworkLifecycle:
     def test_network_listing_and_verification(self, network_case):
         """List returns the exact newly owned bridge and resolved intent."""
@@ -810,8 +927,9 @@ class TestNetworkLifecycle:
             connected
         )
 
-    def test_network_create_no_nat(self, network_case):
-        receipt = network_case.create_network(nat=False)
+    @pytest.mark.parametrize("uplink", [None, "none"])
+    def test_network_create_no_nat(self, network_case, uplink):
+        receipt = network_case.create_network(nat=False, uplink=uplink)
         inspected = _data(network_case.runner_vm, "network", "inspect", receipt.id)
         assert inspected["nat"] == {"nat_enabled": False}
         assert not any(
