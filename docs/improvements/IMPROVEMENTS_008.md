@@ -12,7 +12,7 @@
 > | Phase 3: Clone from Snapshot (`vm create --snapshot`) | ❌ Not started |
 > | Phase 4: Hot-Standby Pool | ❌ Not started |
 >
-> The snapshot domain (`internal/core/snapshot/`), CLI commands (`internal/cli/snapshot.go`), API layer (`pkg/api/snapshot.go`), and input validation (`pkg/api/inputs/snapshot.go`) are all implemented. The `SnapshotItem` model uses `SnapshotDir`, `MemoryFile`, `StateFile`, `RootfsFile`, `ImageID`, `ExtraConfig` (as `*SnapshotExtraConfig` struct). Firecracker snapshot/resume API is at `internal/lib/firecracker/client.go`. 
+> The snapshot domain (`internal/core/snapshot/`), CLI commands (`internal/cli/snapshot.go`), API layer (`pkg/api/snapshot.go`), and input validation (`pkg/api/inputs/snapshot.go`) are all implemented. The `SnapshotItem` model uses `SnapshotDir`, `MemoryFile`, `StateFile`, `RootfsFile`, `ImageID`, `ExtraConfig` (as `*SnapshotExtraConfig` struct). The typed Firecracker snapshot API is in `internal/service/jailer/snapshot_api.go`.
 >
 > The original hardening plan below is superseded by
 > [ADR-0018](../adr/0018-isolated-vm-execution-and-snapshot-authority.md) and the implementation guide linked above.

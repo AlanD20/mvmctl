@@ -3,10 +3,8 @@
 package common
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -196,9 +194,6 @@ type MVMCli struct{}
 // All display output goes through this single instance.
 var Cli = &MVMCli{}
 
-// NewCli returns the singleton MVMCli instance.
-func NewCli() *MVMCli { return Cli }
-
 // Error prints an error message to stderr in red.
 // All errors use the same format — no "Unexpected" distinction.
 func (c *MVMCli) Error(message string) {
@@ -256,43 +251,6 @@ func (c *MVMCli) Info(message string) {
 		fmt.Printf("%s  %s%s\n", AnsiDim, message, AnsiReset)
 	} else {
 		fmt.Printf("  %s\n", message)
-	}
-}
-
-// SectionHeader prints a bold section title.
-// TTY-aware: bold style is stripped when piped.
-func (c *MVMCli) SectionHeader(title string) {
-	if StructuredOutput() {
-		return
-	}
-	if isStdoutTTY() {
-		fmt.Printf("\n%s%s%s\n", AnsiBold, title, AnsiReset)
-	} else {
-		fmt.Printf("\n%s\n", title)
-	}
-}
-
-// InspectHeader prints an inspect-style header with underline.
-func (c *MVMCli) InspectHeader(title, subtitle string) {
-	if StructuredOutput() {
-		return
-	}
-	tty := isStdoutTTY()
-	if subtitle != "" {
-		full := fmt.Sprintf("%s (%s)", title, subtitle)
-		if tty {
-			fmt.Printf("\n%s%s%s\n", AnsiBold, full, AnsiReset)
-		} else {
-			fmt.Printf("\n%s\n", full)
-		}
-		fmt.Println(strings.Repeat("=", len(full)))
-	} else {
-		if tty {
-			fmt.Printf("\n%s%s%s\n", AnsiBold, title, AnsiReset)
-		} else {
-			fmt.Printf("\n%s\n", title)
-		}
-		fmt.Println(strings.Repeat("=", len(title)))
 	}
 }
 
@@ -478,9 +436,6 @@ func (c *MVMCli) formatLeafValue(key string, value any) string {
 
 // --- Static helper functions ---
 
-// SecTZ is ISO8601 with seconds and timezone.
-const SecTZ = time.RFC3339
-
 func parseTime(isoString string) (time.Time, bool) {
 	// Only RFC3339 is valid. Nano-precision variants of RFC3339 are also accepted.
 	for _, f := range []string{time.RFC3339, time.RFC3339Nano} {
@@ -593,14 +548,6 @@ func (c *MVMCli) FormatName(name string, isMissing bool) string {
 	return name
 }
 
-// FormatEntityName returns a display-ready entity name.
-func (c *MVMCli) FormatEntityName(name string) string {
-	if name == "" {
-		return "-"
-	}
-	return name
-}
-
 // settingNilOverrides maps setting keys to human-readable labels for nil values.
 // e.g., build_jobs = nil means "use all cores" — display as "<auto>".
 var settingNilOverrides = map[string]string{
@@ -631,104 +578,6 @@ func (c *MVMCli) FormatSettingValue(v any, key string) string {
 		return "(unset)"
 	}
 	return fmt.Sprintf("%v", v)
-}
-
-// FormatJSON marshals v to indented JSON.
-func (c *MVMCli) FormatJSON(v any) string {
-	b, _ := json.MarshalIndent(v, "", "  ")
-	return string(b)
-}
-
-// MarshalJSONDefaultStr marshals to JSON with fallback string conversion for
-// non-serializable values.
-// On marshalling error, recursively converts non-serializable values to strings.
-func MarshalJSONDefaultStr(v any) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err == nil {
-		return string(b)
-	}
-	v2 := convertToStringsRecursive(v)
-	b, _ = json.MarshalIndent(v2, "", "  ")
-	return string(b)
-}
-
-// convertToStringsRecursive recursively converts non-serializable Go types to strings.
-func convertToStringsRecursive(v any) any {
-	if v == nil {
-		return nil
-	}
-	switch val := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(val))
-		for k, item := range val {
-			out[k] = convertToStringsRecursive(item)
-		}
-		return out
-	case []any:
-		out := make([]any, len(val))
-		for i, item := range val {
-			out[i] = convertToStringsRecursive(item)
-		}
-		return out
-	default:
-		if _, err := json.Marshal(v); err != nil {
-			return fmt.Sprintf("%v", v)
-		}
-		return v
-	}
-}
-
-// --- Error display ---
-
-// FormatError returns a clean, user-friendly error string suitable for
-// display to the user in the format: "✗ Error: <message>"
-func (c *MVMCli) FormatError(err error) string {
-	if err == nil {
-		return ""
-	}
-	var de *errs.DomainError
-	if errors.As(err, &de) {
-		if de.Message != "" {
-			return "✗ Error: " + de.Message
-		}
-		if de.Entity != "" {
-			if isNotFoundCode(de.Code) {
-				return "✗ Error: " + de.Entity + " not found"
-			}
-			if isAlreadyExistsCode(de.Code) {
-				return "✗ Error: " + de.Entity + " already exists"
-			}
-		}
-		return "✗ Error: " + string(de.Code)
-	}
-	return "✗ Error: " + err.Error()
-}
-
-func isNotFoundCode(c errs.Code) bool {
-	s := string(c)
-	return strings.HasSuffix(s, ".not_found") || s == "not_found"
-}
-
-func isAlreadyExistsCode(c errs.Code) bool {
-	s := string(c)
-	return strings.HasSuffix(s, ".already_exists") || s == "already_exists"
-}
-
-// DisplayError returns a verbose error string for debugging.
-func (c *MVMCli) DisplayError(err error, verbose bool) string {
-	var de *errs.DomainError
-	if errors.As(err, &de) {
-		var b strings.Builder
-		fmt.Fprintf(&b, "ERROR %s\n", de.Code)
-		if de.Message != "" {
-			fmt.Fprintf(&b, "│\n│   %s\n", de.Message)
-		}
-		if verbose && de.Err != nil {
-			fmt.Fprintf(&b, "│\n│   Caused by: %v\n", de.Err)
-		}
-		return b.String()
-	}
-	return fmt.Sprintf("ERROR: %v\n", err)
 }
 
 // --- ListingColumn ---
@@ -948,79 +797,4 @@ func (c *MVMCli) PromptSelect(ctx context.Context, title string, options []strin
 		}
 		return options[defaultIdx], nil
 	}
-}
-
-// PromptMultiSelect shows numbered options on stderr and returns selected values
-// from a comma-separated input. Returns defaultIndices on empty input.
-// If defaultIndices is nil, defaults to the first option.
-func (c *MVMCli) PromptMultiSelect(
-	ctx context.Context,
-	title string,
-	options []string,
-	defaultIndices []int,
-) ([]string, error) {
-	if StructuredOutput() {
-		return nil, errs.New(
-			"cli.interaction.required",
-			"structured output requires explicit noninteractive options",
-			errs.WithClass(errs.ClassNeedsInteraction),
-		)
-	}
-	c.Info(title)
-	for i, opt := range options {
-		c.Info(fmt.Sprintf("  [%d] %s", i+1, opt))
-	}
-	def := 1
-	if len(defaultIndices) > 0 {
-		def = defaultIndices[0] + 1
-	}
-	fmt.Fprintf(os.Stderr, "Select number(s) [comma-separated] [%d]: ", def)
-
-	ch := make(chan string, 1)
-	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
-		ch <- input
-	}()
-
-	var input string
-	select {
-	case <-ctx.Done():
-		_ = os.Stdin.Close() // best-effort; unblocks the ReadString goroutine
-		return nil, ctx.Err()
-	case input = <-ch:
-	}
-
-	input = strings.TrimSpace(input)
-
-	if input == "" {
-		if len(defaultIndices) > 0 {
-			selected := make([]string, len(defaultIndices))
-			for i, idx := range defaultIndices {
-				selected[i] = options[idx]
-			}
-			return selected, nil
-		}
-		return []string{options[0]}, nil
-	}
-
-	var selected []string
-	for _, part := range strings.Split(input, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		var idx int
-		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
-			return nil, fmt.Errorf("invalid selection: %s", input)
-		}
-		if idx < 1 || idx > len(options) {
-			return nil, fmt.Errorf("invalid index: %d (options are 1-%d)", idx, len(options))
-		}
-		selected = append(selected, options[idx-1])
-	}
-	if len(selected) == 0 {
-		return nil, fmt.Errorf("no valid selections")
-	}
-	return selected, nil
 }

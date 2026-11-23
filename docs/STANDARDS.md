@@ -544,7 +544,6 @@ func completeVMThenVolume(cmd *cobra.Command, args []string, toComplete string) 
 Existing examples in codebase:
 - `completeConfigGet` / `completeConfigSet` — dispatch by category vs key
 - `completeVMThenVolume` — VM names then volume names
-- `completeVMThenFile` — VM names then file paths
 - `completeKeyThenDir` — key names then directory paths
 - `completeVolumeThenSize` — volume names then size suggestions
 

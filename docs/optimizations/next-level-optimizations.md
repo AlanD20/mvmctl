@@ -243,7 +243,7 @@ Instead, the Go equivalents are:
 
 | Go-Specific Micro-Optimization | Status |
 |---|---|
-| Connection pooling for Firecracker API client (`internal/lib/firecracker/client.go`) | ❌ Not done — single-use HTTP client per VM |
+| Connection pooling for typed Firecracker requests in the Jailer service | Reassess against the current broker design |
 | Event-driven VM state monitoring (vs polling) | ❌ Not done |
 | Memory ballooning (Firecracker API) | ❌ Not done — runtime overcommit only, not a teardown mechanism; see [MEMORY_RECLAIM.md](../implementations/MEMORY_RECLAIM.md) |
 | CPU pinning (Firecracker machine config) | ❌ Not done |

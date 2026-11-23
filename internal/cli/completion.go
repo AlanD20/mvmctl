@@ -114,23 +114,6 @@ func completeExecPolicyCreate(
 	return nil, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completePolicyCreate completes source network, destination VM, and protocol positionally.
-func completePolicyCreate(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	switch len(args) {
-	case 0:
-		return completeNetworkNames(cmd, args, toComplete)
-	case 1:
-		return completeVMNames(cmd, args, toComplete)
-	case 2:
-		protocols := []string{"tcp", "udp"}
-		return slices.DeleteFunc(protocols, func(protocol string) bool {
-			return !strings.HasPrefix(protocol, toComplete)
-		}), cobra.ShellCompDirectiveNoFileComp
-	default:
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-}
-
 // completeImageIDs completes with local image types and short IDs.
 func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if opRef == nil {
@@ -340,14 +323,6 @@ func completeVMThenVolume(cmd *cobra.Command, args []string, toComplete string) 
 		return completeVMNames(cmd, args, toComplete)
 	}
 	return completeVolumeNames(cmd, args, toComplete)
-}
-
-// completeVMThenFile completes positionally: arg0 = VM names, arg1+ = native file completion.
-func completeVMThenFile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if len(args) == 0 {
-		return completeVMNames(cmd, args, toComplete)
-	}
-	return nil, cobra.ShellCompDirectiveDefault
 }
 
 // completeKeyThenDir completes positionally: arg0 = key names, arg1+ = directory-only completion.

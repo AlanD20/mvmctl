@@ -70,7 +70,7 @@ Not every domain follows the same internal structure. The pattern varies by comp
 - **Provisioner/Service/Repository/Resolver**: image
 - **Controller/Service/Repository**: host
 - **Repository + Resolver**: snapshot
-- **Controller only**: console
+- **Console lifecycle**: public API and typed Jailer operations
 - **Service only**: cache, ssh, update
 - **Service + Repository**: config (includes constraints registry)
 - **Controller + Service**: logs
