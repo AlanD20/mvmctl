@@ -40,6 +40,9 @@ def test_floating_ip_create_inspect_and_explicit_removal(runner_vm, floating_net
     assert item == {
         "id": item["id"], "network_id": net["id"], "name": "api",
         "ipv4": _address(net, 100), "generation": 1, "retired": False,
+        "phase": "unassociated", "owner_vm_id": "", "owner_origin": "", "lifetime": "",
+        "owner_boot_id": "", "owner_launch_generation": 0, "authority_state": "unobserved",
+        "lease_remaining_ms": 0, "alias_synchronization": "",
     }
     assert _items(runner_vm, net) == [item]
     for selector in ("api", item["id"][:8], item["ipv4"]):
