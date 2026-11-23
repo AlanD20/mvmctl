@@ -96,6 +96,8 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 	var subnet string
 	var ipv4Gateway string
 	var noNAT bool
+	var uplink string
+	var uplinkGateway string
 	var setDefault bool
 
 	cmd := &cobra.Command{
@@ -123,12 +125,24 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 			if ipv4Gateway != "" {
 				gw = &ipv4Gateway
 			}
+			if noNAT && cmd.Flags().Changed("uplink") && uplink != "none" {
+				return fmt.Errorf("--no-nat conflicts with --uplink %s", uplink)
+			}
+			if uplink == "" {
+				return fmt.Errorf("--uplink requires auto, none, or an interface name")
+			}
+			namedUplink := uplink
+			if uplink == "auto" || uplink == "none" {
+				namedUplink = ""
+			}
 			input := inputs.NetworkCreateInput{
-				Name:        name,
-				Subnet:      subnet,
-				IPv4Gateway: gw,
-				NATEnabled:  !noNAT,
-				SetDefault:  setDefault,
+				Name:             name,
+				Subnet:           subnet,
+				IPv4Gateway:      gw,
+				NATEnabled:       !noNAT && uplink != "none",
+				NATUplink:        namedUplink,
+				NATUplinkGateway: uplinkGateway,
+				SetDefault:       setDefault,
 			}
 
 			net, err := networkAPI.NetworkCreate(cmd.Context(), input)
@@ -149,6 +163,8 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 
 	cmd.Flags().StringVar(&subnet, "subnet", "", "IP subnet in SUBNET notation (e.g. 192.168.100.0/24)")
 	cmd.Flags().StringVar(&ipv4Gateway, "ipv4-gateway", "", "Gateway IPv4 for the bridge")
+	cmd.Flags().StringVar(&uplinkGateway, "uplink-gateway", "", "IPv4 next hop on a named NAT uplink")
+	cmd.Flags().StringVar(&uplink, "uplink", "auto", "NAT uplink: auto, none, or an existing host interface")
 	cmd.Flags().BoolVar(&noNAT, "no-nat", false, "Disable NAT/masquerade")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default network")
 	return cmd

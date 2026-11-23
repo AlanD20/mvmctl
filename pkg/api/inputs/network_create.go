@@ -6,32 +6,48 @@ import (
 
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/lib/model"
+	netlib "mvmctl/internal/lib/network"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
 
-// NetworkCreateInput specifies logical network intent; root selects any NAT uplink.
+// NetworkCreateInput specifies logical network intent, including an optional named IPv4 uplink.
 type NetworkCreateInput struct {
-	Name        string  `json:"name" yaml:"name"`
-	Subnet      string  `json:"subnet" yaml:"subnet"`
-	IPv4Gateway *string `json:"ipv4_gateway,omitempty" yaml:"ipv4_gateway,omitempty"`
-	NATEnabled  bool    `json:"nat_enabled" yaml:"nat_enabled"`
-	SetDefault  bool    `json:"default" yaml:"default"`
+	Name             string  `json:"name" yaml:"name"`
+	Subnet           string  `json:"subnet" yaml:"subnet"`
+	IPv4Gateway      *string `json:"ipv4_gateway,omitempty" yaml:"ipv4_gateway,omitempty"`
+	NATUplinkGateway string  `json:"nat_uplink_gateway,omitempty" yaml:"nat_uplink_gateway,omitempty"`
+	NATUplink        string  `json:"nat_uplink,omitempty" yaml:"nat_uplink,omitempty"`
+	NATEnabled       bool    `json:"nat_enabled" yaml:"nat_enabled"`
+	SetDefault       bool    `json:"default" yaml:"default"`
 }
 
 // ResolvedNetworkCreateRequest contains canonical values and optional retryable desired state.
 type ResolvedNetworkCreateRequest struct {
-	Name        string
-	Subnet      string
-	IPv4Gateway string
-	NATEnabled  bool
-	Pending     *model.NetworkItem
+	Name             string
+	Subnet           string
+	IPv4Gateway      string
+	NATEnabled       bool
+	NATUplink        string
+	NATUplinkGateway string
+	Pending          *model.NetworkItem
 }
 
 // Validate requires canonical private IPv4 intent with a usable gateway.
 func (input *NetworkCreateInput) Validate() error {
 	if err := validators.NetworkName(input.Name); err != nil {
 		return errs.Wrap(errs.CodeValidationFailed, err)
+	}
+	if input.NATUplink != "" && (!input.NATEnabled || !netlib.ValidUplinkName(input.NATUplink)) {
+		return errs.New(errs.CodeValidationFailed, "a named NAT uplink requires NAT and a valid host interface name")
+	}
+	if input.NATUplinkGateway != "" {
+		if _, ok := netlib.ParseUplinkGateway(input.NATUplinkGateway); !ok || input.NATUplink == "" {
+			return errs.New(
+				errs.CodeValidationFailed,
+				"NAT uplink gateway requires a named uplink and an IPv4 next hop",
+			)
+		}
 	}
 	prefix, err := netip.ParsePrefix(input.Subnet)
 	if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.String() != input.Subnet ||
@@ -84,10 +100,12 @@ func (input *NetworkCreateInput) Resolve(
 		gateway = *input.IPv4Gateway
 	}
 	result := &ResolvedNetworkCreateRequest{
-		Name:        input.Name,
-		Subnet:      input.Subnet,
-		IPv4Gateway: gateway,
-		NATEnabled:  input.NATEnabled,
+		Name:             input.Name,
+		Subnet:           input.Subnet,
+		IPv4Gateway:      gateway,
+		NATEnabled:       input.NATEnabled,
+		NATUplink:        input.NATUplink,
+		NATUplinkGateway: input.NATUplinkGateway,
 	}
 	existing, err := repo.GetByName(ctx, input.Name, true)
 	if err != nil {
@@ -97,7 +115,8 @@ func (input *NetworkCreateInput) Resolve(
 		if existing.DeletedAt != nil || existing.IsPresent || existing.BridgeActive ||
 			existing.Subnet != input.Subnet ||
 			existing.IPv4Gateway != gateway ||
-			existing.NATEnabled != input.NATEnabled {
+			existing.NATEnabled != input.NATEnabled || existing.NATUplink != input.NATUplink ||
+			existing.NATUplinkGateway != input.NATUplinkGateway {
 			return nil, errs.AlreadyExists(errs.CodeNetworkAlreadyExists, input.Name)
 		}
 		result.Pending = existing

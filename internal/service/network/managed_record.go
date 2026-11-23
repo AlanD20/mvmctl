@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	netlib "mvmctl/internal/lib/network"
 )
 
-const managedNetworkSchemaVersion = uint32(2)
+const managedNetworkSchemaVersion = uint32(3)
 
 type managedNetworkConfiguration struct {
 	l3     managedNetworkL3
@@ -31,16 +33,19 @@ type managedNetworkRecordWire struct {
 }
 
 type managedUplinkWire struct {
-	Link       networkAuthorityLinkWire `json:"link"`
-	Kind       string                   `json:"kind"`
-	DeviceType uint16                   `json:"device_type"`
-	Alias      string                   `json:"alias"`
-	Master     int                      `json:"master"`
-	Gateway    string                   `json:"gateway"`
-	Source     string                   `json:"source"`
-	Protocol   uint8                    `json:"protocol"`
-	Scope      uint8                    `json:"scope"`
-	Metric     *uint32                  `json:"metric"`
+	RequestedGateway string                   `json:"requested_gateway"`
+	Named            bool                     `json:"named"`
+	HasDefault       bool                     `json:"has_default"`
+	Link             networkAuthorityLinkWire `json:"link"`
+	Kind             string                   `json:"kind"`
+	DeviceType       uint16                   `json:"device_type"`
+	Alias            string                   `json:"alias"`
+	Master           int                      `json:"master"`
+	Gateway          string                   `json:"gateway"`
+	Source           string                   `json:"source"`
+	Protocol         uint8                    `json:"protocol"`
+	Scope            uint8                    `json:"scope"`
+	Metric           *uint32                  `json:"metric"`
 }
 
 var managedNetworkObjectFields = map[string]map[string]struct{}{
@@ -50,7 +55,7 @@ var managedNetworkObjectFields = map[string]map[string]struct{}{
 	"link":           networkAuthorityFields("name", "ifindex", "namespace"),
 	"namespace":      networkAuthorityFields("device", "inode"),
 	"uplink": networkAuthorityFields("link", "kind", "device_type", "alias", "master", "gateway", "source",
-		"protocol", "scope", "metric"),
+		"protocol", "scope", "metric", "named", "has_default", "requested_gateway"),
 }
 
 func validateManagedNetworkConfiguration(record networkAuthorityRecord) error {
@@ -74,12 +79,24 @@ func validateManagedNetworkConfiguration(record networkAuthorityRecord) error {
 	uplink := configuration.uplink
 	if uplink == nil || uplink.link.namespace != record.managedBridge.namespace || uplink.link.ifIndex <= 0 ||
 		uplink.link.name == "" || len(uplink.link.name) > linuxInterfaceNameMax ||
-		uplink.deviceType == unix.ARPHRD_LOOPBACK || uplink.route.ifIndex != uplink.link.ifIndex ||
-		uplink.route.destination != netip.MustParsePrefix("0.0.0.0/0") || uplink.route.kind != unix.RTN_UNICAST ||
-		uplink.route.table != unix.RT_TABLE_MAIN || isManagedUplinkLink(routeLinkObservation{
+		uplink.deviceType == unix.ARPHRD_LOOPBACK || isManagedUplinkLink(routeLinkObservation{
 		name: uplink.link.name, alias: uplink.alias,
 	}) {
 		return networkAuthorityCorruptError("managed network selected uplink evidence is invalid", nil)
+	}
+	if uplink.named && (!netlib.ValidUplinkName(uplink.link.name.String()) || uplink.master != 0) {
+		return networkAuthorityCorruptError("managed network named uplink is invalid", nil)
+	}
+	if uplink.requestedGateway.IsValid() &&
+		(!uplink.named || !uplink.route.hasGateway || uplink.route.gateway != uplink.requestedGateway) {
+		return networkAuthorityCorruptError("requested uplink gateway differs from route authority", nil)
+	}
+	if uplink.named && uplink.route == (routeIPv4Observation{}) {
+		return nil
+	}
+	if uplink.route.ifIndex != uplink.link.ifIndex || uplink.route.destination != netip.MustParsePrefix("0.0.0.0/0") ||
+		uplink.route.kind != unix.RTN_UNICAST || uplink.route.table != unix.RT_TABLE_MAIN {
+		return networkAuthorityCorruptError("managed network uplink default route is invalid", nil)
 	}
 	if (uplink.route.hasGateway && !uplink.route.gateway.Is4()) ||
 		(uplink.route.hasSource && !uplink.route.source.Is4()) {
@@ -107,9 +124,20 @@ func encodeManagedNetworkRecord(record networkAuthorityRecord) ([]byte, error) {
 		NAT: configuration.nat,
 	}
 	if uplink := configuration.uplink; uplink != nil {
-		wire.Uplink = &managedUplinkWire{Link: networkLinkWire(uplink.link), Kind: uplink.kind,
-			DeviceType: uplink.deviceType, Alias: uplink.alias, Master: uplink.master,
-			Protocol: uplink.route.protocol, Scope: uplink.route.scope}
+		wire.Uplink = &managedUplinkWire{
+			Named:      uplink.named,
+			HasDefault: uplink.route.destination.IsValid(),
+			Link:       networkLinkWire(uplink.link),
+			Kind:       uplink.kind,
+			DeviceType: uplink.deviceType,
+			Alias:      uplink.alias,
+			Master:     uplink.master,
+			Protocol:   uplink.route.protocol,
+			Scope:      uplink.route.scope,
+		}
+		if uplink.requestedGateway.IsValid() {
+			wire.Uplink.RequestedGateway = uplink.requestedGateway.String()
+		}
 		if uplink.route.hasGateway {
 			wire.Uplink.Gateway = uplink.route.gateway.String()
 		}
@@ -155,11 +183,29 @@ func decodeManagedNetworkRecord(raw []byte) (networkAuthorityRecord, error) {
 		), bootID: wire.BootID, managedBridge: networkLinkFromWire(wire.ManagedBridge),
 		configuration: &managedNetworkConfiguration{l3: l3, nat: wire.NAT}}
 	if source := wire.Uplink; source != nil {
-		uplink := &selectedUplink{link: networkLinkFromWire(source.Link), kind: source.Kind,
-			deviceType: source.DeviceType, alias: source.Alias, master: source.Master,
-			route: routeIPv4Observation{destination: netip.MustParsePrefix("0.0.0.0/0"),
+		uplink := &selectedUplink{named: source.Named, link: networkLinkFromWire(source.Link), kind: source.Kind,
+			deviceType: source.DeviceType, alias: source.Alias, master: source.Master}
+		if source.RequestedGateway != "" {
+			gateway, valid := netlib.ParseUplinkGateway(source.RequestedGateway)
+			if !valid {
+				return networkAuthorityRecord{}, networkAuthorityCorruptError(
+					"requested uplink gateway is invalid",
+					nil,
+				)
+			}
+			uplink.requestedGateway = gateway
+		}
+		if source.HasDefault {
+			uplink.route = routeIPv4Observation{destination: netip.MustParsePrefix("0.0.0.0/0"),
 				table: unix.RT_TABLE_MAIN, kind: unix.RTN_UNICAST, protocol: source.Protocol,
-				scope: source.Scope, ifIndex: source.Link.IfIndex}}
+				scope: source.Scope, ifIndex: source.Link.IfIndex}
+		} else if source.Gateway != "" || source.Source != "" || source.Protocol != 0 ||
+			source.Scope != 0 || source.Metric != nil {
+			return networkAuthorityRecord{}, networkAuthorityCorruptError(
+				"absent uplink default carries route data",
+				nil,
+			)
+		}
 		if source.Gateway != "" {
 			uplink.route.gateway, err = netip.ParseAddr(source.Gateway)
 			if err != nil || uplink.route.gateway.String() != source.Gateway {

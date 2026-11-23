@@ -234,7 +234,7 @@ func newNetworkStepFromSpec(
 		return nil, errors.New("operation not initialized")
 	}
 	if _, exists := spec["nat_gateways"]; exists {
-		return nil, errors.New("network nat_gateways is unsupported; root selects the NAT uplink")
+		return nil, errors.New("network nat_gateways is unsupported; use nat_uplink")
 	}
 
 	data, err := yaml.Marshal(spec)
@@ -254,6 +254,20 @@ func newNetworkStepFromSpec(
 	input.NATEnabled = true
 	if _, exists := spec["nat_enabled"]; exists {
 		input.NATEnabled = spec.GetBool("nat_enabled")
+	}
+
+	switch input.NATUplink {
+	case "auto":
+		if !input.NATEnabled {
+			return nil, errors.New("network nat_uplink auto requires NAT")
+		}
+		input.NATUplink = ""
+	case "none":
+		if _, exists := spec["nat_enabled"]; exists && input.NATEnabled {
+			return nil, errors.New("network nat_uplink none conflicts with nat_enabled true")
+		}
+		input.NATEnabled = false
+		input.NATUplink = ""
 	}
 
 	return &NetworkStep{

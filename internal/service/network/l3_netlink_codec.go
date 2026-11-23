@@ -125,6 +125,25 @@ func ipv4RouteTable(data []byte) (uint32, error) {
 	return table, decoder.Err()
 }
 
+// ipv4RouteOutputIndex obtains the single output device before interpreting a candidate default route.
+func ipv4RouteOutputIndex(data []byte) (uint32, error) {
+	decoder, err := netlink.NewAttributeDecoder(data[unix.SizeofRtMsg:])
+	if err != nil {
+		return 0, err
+	}
+	var index uint32
+	for decoder.Next() {
+		if decoder.Type() != unix.RTA_OIF {
+			continue
+		}
+		if index != 0 {
+			return 0, errors.New("duplicate IPv4 route output device attribute")
+		}
+		index = decoder.Uint32()
+	}
+	return index, decoder.Err()
+}
+
 func decodeRouteIPv4Message(message netlink.Message) (routeIPv4Observation, error) {
 	if message.Header.Type != netlink.HeaderType(unix.RTM_NEWROUTE) {
 		return routeIPv4Observation{}, fmt.Errorf("unexpected IPv4 route message type %d", message.Header.Type)

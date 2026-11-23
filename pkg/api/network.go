@@ -41,7 +41,8 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 		identitySeed := createdAt + ":" + crypto.UUIDV4()
 		item = &model.NetworkItem{ID: crypto.NetworkID(resolved.Name, resolved.Subnet, identitySeed),
 			Name: resolved.Name, Subnet: resolved.Subnet, IPv4Gateway: resolved.IPv4Gateway,
-			NATEnabled: resolved.NATEnabled, CreatedAt: createdAt, UpdatedAt: createdAt,
+			NATEnabled: resolved.NATEnabled, NATUplink: resolved.NATUplink,
+			NATUplinkGateway: resolved.NATUplinkGateway, CreatedAt: createdAt, UpdatedAt: createdAt,
 			Bridge: "", BridgeActive: false, IsPresent: false}
 		// This row is desired state only. Root never reads it and acknowledgement alone publishes observed state.
 		if err := op.Repos.Network.Upsert(ctx, item); err != nil {
@@ -105,13 +106,14 @@ func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) 
 	return networks[0], nil
 }
 
-// NetworkToJSON exposes logical NAT intent without an uplink selector.
+// NetworkToJSON exposes the desired NAT configuration.
 func (op *Operation) NetworkToJSON(networks []*model.NetworkItem) []map[string]any {
 	items := make([]map[string]any, 0, len(networks))
 	for _, item := range networks {
 		items = append(items, map[string]any{"id": item.ID, "name": item.Name, "subnet": item.Subnet,
 			"bridge": item.Bridge, "ipv4_gateway": item.IPv4Gateway, "bridge_active": item.BridgeActive,
-			"nat_enabled": item.NATEnabled, "is_default": item.IsDefault, "is_present": item.IsPresent,
+			"nat_enabled": item.NATEnabled, "nat_uplink": item.NATUplink,
+			"nat_uplink_gateway": item.NATUplinkGateway, "is_default": item.IsDefault, "is_present": item.IsPresent,
 			"created_at": item.CreatedAt, "updated_at": item.UpdatedAt})
 	}
 	return items
@@ -160,7 +162,11 @@ func (op *Operation) NetworkInspect(ctx context.Context, input inputs.NetworkInp
 			IsPresent:    item.IsPresent,
 			IsDefault:    item.IsDefault,
 		},
-		NAT:    results.NetworkNATInfo{NATEnabled: item.NATEnabled},
+		NAT: results.NetworkNATInfo{
+			NATEnabled:       item.NATEnabled,
+			NATUplink:        item.NATUplink,
+			NATUplinkGateway: item.NATUplinkGateway,
+		},
 		Leases: leaseList,
 	}, nil
 }

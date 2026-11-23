@@ -107,6 +107,8 @@ CREATE TABLE networks (
     bridge TEXT NOT NULL,
     ipv4_gateway TEXT NOT NULL,
     bridge_active INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
+    nat_uplink TEXT NOT NULL DEFAULT '',
+    nat_uplink_gateway TEXT NOT NULL DEFAULT '',
     nat_enabled INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     is_default INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     is_present INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=bridge missing, 1=bridge exists
