@@ -157,11 +157,13 @@ Create a network for VMs to connect to.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `subnet` | `string` | **Yes** | — | Canonical masked IPv4 CIDR wholly inside RFC1918 space, prefix length at most `/30`; e.g. `"172.27.0.0/24"`. |
-| `nat_enabled` | `bool` | No | `true` | Enable NAT for internet access. |
+| `nat_enabled` | `bool` | No | `true` | Enable IPv4 NAT. |
+| `nat_uplink` | `string` | No | `auto` | Discover the default-route interface, use `none` to disable NAT, or name an existing host interface. |
+| `nat_uplink_gateway` | `string` | No | — | On-link IPv4 next hop for a named uplink. |
 | `ipv4_gateway` | `string` | No | First usable address | Canonical usable IPv4 address inside the subnet. |
 | `default` | `bool` | No | `false` | Set as default network. |
 
-Omit `nat_gateways`: it is rejected. The privileged network service selects the NAT uplink.
+For a named uplink, mvmctl manages guest egress routing. See [Network commands](REFERENCES.md#mvm-network).
 
 **Example:**
 ```yaml

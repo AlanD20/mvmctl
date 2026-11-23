@@ -307,7 +307,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `network create` duplicate name/subnet | **L2** | Real DB constraint |
 | `network create --no-nat` | **L2** | Verify no managed nftables NAT rule |
 | `network create --ipv4-gateway` | **L2** | Real bridge IP config |
-| `network create --nat-gateways` (removed) | **L2** | Reject the caller-selected uplink flag before effects |
+| `network create --uplink <interface>` | **L2** | Verify guest egress through a custom uplink and exact route and rule cleanup |
 | `network ls` / `network ls --json` | L1 | DB query + JSON |
 | `network inspect` / `--json` / `--tree` | L1 | DB query + JSON |
 | `network rm` / `network rm --force` | **L2** | Real bridge + firewall cleanup |

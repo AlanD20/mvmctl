@@ -561,21 +561,27 @@ The network resolver tries selectors in priority order:
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--default, -d` | Create a named bridge network without prompting |
+| `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--uplink`, `--uplink-gateway`, `--no-nat`, `--default, -d` | Create a named bridge network without prompting |
 | `mvm network rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more networks |
 | `mvm network ls` | `--json, --long` | List all networks |
 | `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details, IP leases, and active firewall rules |
 | `mvm network default` | `[SELECTOR]` | Set a network as the default for VM creation |
 | `mvm network sync` | `[SELECTORS]...`, `--json` | Sync firewall rules between database and host |
 
-NAT intent is enabled or disabled; `--nat-gateways` and caller-selected uplink names are removed. Root selects the
-eligible host uplink. Typed root network creation applies its firewall generation before raising the bridge, and
-removal uses exact ownership and reference checks with a durable receipt. Core/API network mutations consume these
-transactions. A pending desired network can be retried only with matching inputs. If no root network record exists,
-removal can acknowledge cancellation only after root proves the complete bridge/topology/firewall state absent; it
-performs no speculative kernel deletion. Cancellation tombstones prevent reuse of that network ID. Old-boot removal
-receipts also require fresh absence proofs. These paths have not been qualified. NoCloud now uses typed fixed-slot
-host-service grants and no longer uses the legacy tracker.
+Use `--uplink auto` (the default) to discover the host's IPv4 default-route interface.
+Use `--uplink none` or `--no-nat` to disable NAT.
+
+Set `--uplink <interface>` to route through an existing IPv4 Ethernet, Wi-Fi, or bridge interface.
+mvmctl uses a default route on that interface if one exists. For a different next hop, set
+`--uplink-gateway <ipv4>` to an address reachable directly through the interface. Without a next
+hop, guests can reach destinations routed through that interface, such as its directly connected subnet.
+
+```bash
+mvm network create lab --subnet 172.27.0.0/24 --uplink br-lab --uplink-gateway 192.168.50.1
+```
+
+Named uplinks keep local and more-specific host routes in place. mvmctl applies traffic policies
+between managed networks and allows general NAT egress only through the selected interface.
 
 ---
 

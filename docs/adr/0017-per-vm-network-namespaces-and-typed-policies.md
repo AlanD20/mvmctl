@@ -79,28 +79,27 @@ immutable network or VM ID, and fixed role. Root re-derives and compares them at
 input, persistent desired-state row, or recovery request may provide a raw interface name, namespace path, route,
 descriptor, netlink request, or `ip` argument.
 
-#### Root-selected NAT uplink
+#### NAT uplink selection and routing
 
-The v0.3.0 public network contract retains only the NAT enabled/disabled choice. The unprivileged API, configuration,
-user model, and privileged request expose no `NATGateways` list, interface name, ifindex, route, or uplink selector.
-When NAT is disabled, no uplink authority is required and the firewall compiler emits neither uplink egress nor NAT.
+A managed network can use Auto, None, or an existing named IPv4 host interface. Auto requires all
+eligible main-table default routes to resolve to one interface. Metrics do not choose between Auto
+interfaces. None adds neither a general egress allowance nor masquerading.
 
-When NAT is enabled, root uses a typed rtnetlink authority pinned to the exact host network namespace to discover the
-eligible main-table IPv4 default routes. Each eligible route must be unicast `0.0.0.0/0` with exactly one output
-interface, no multipath next hops, and a resolved link that is neither loopback nor mvm-owned. Multiple eligible
-routes are accepted only when all resolve to the same uplink ifindex. Root retains a deterministic representative
-independent of route-dump order. No eligible uplink or distinct eligible uplinks fail closed, even when metrics differ;
-metrics never choose between uplinks. Multi-uplink selection remains unsupported in v0.3.0.
+Root resolves a named interface inside the pinned host network namespace. It verifies the
+interface and IPv4 next hop before applying routing or activating a VM. The default next hop is
+selected from main-table default routes on that interface; a caller can also supply an on-link
+IPv4 next hop. With no next hop, destinations already routed through the interface remain reachable.
 
-The admitted managed-network authority persists the selected uplink's exact ifindex, name, link kind, and host
-network-namespace device/inode. Root reopens and revalidates both route and link immediately before compilation,
-application, and topology activation. A missing route, changed interface or namespace identity, replacement, or
-additional eligible uplink blocks activation and preserves cleanup authority. Only this retained typed identity may
-enter the private compiler; a caller-provided raw link name never does.
+Root journals the selected link and route evidence before applying a derived routing table and
+rules scoped to the managed ingress bridge and source prefix. Local and more-specific main routes
+retain precedence. The named table supplies the default, and an unreachable rule prevents fallback.
+nftables continues to restrict NAT and general IPv4 egress to the selected interface. The managed
+bridge and per-VM namespace remain in place, including when the named interface is itself a bridge.
 
-Accepted clarification (2026-10-19): route uniqueness is defined by the resolved uplink identity, not by route count.
-Several routes on the same interface do not create a choice of egress interface. This supersedes the earlier
-exactly-one-route restriction while retaining exact route/link revalidation and refusal of distinct uplinks.
+The bridge stays down during first application. Exclusive netlink writes and readback reject foreign
+rule or table state. Removal lowers the bridge, removes its firewall and routing entries, verifies
+absence, and then retires the root record. Prior-boot entries are historical evidence used to prove
+absence. Administrators with root or equivalent networking privileges are trusted.
 
 #### Retained activation authority
 

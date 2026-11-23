@@ -670,16 +670,14 @@ numbered. The veth pair, namespace-local bridge, and TAP are unnumbered and own 
 route through the resolved gateway, all without an explicit metric. Default guest MACs use `02:fc` plus four bytes of
 the versioned, NUL-framed owner/VM SHA-256 derivation; the selected globally unique unicast MAC is persisted.
 
-Public NAT intent is only enabled or disabled; v0.3.0 removes the public/unprivileged `NATGateways` interface-name
-choice. For enabled NAT, root discovers eligible IPv4 main-table default routes through typed rtnetlink pinned to the
-host network namespace. Multiple routes are permitted only when all resolve to the same uplink ifindex. Root retains a
-deterministic representative independent of route-dump order, persists its exact route and link identity, and
-revalidates it before compile/apply/activation. No eligible uplink, distinct uplinks even at different metrics,
-multipath, replacement, or changed retained evidence fail closed; multi-uplink selection is unsupported. The public
-NAT interface-name selectors are removed. Named root managed-network create/remove and exact removal receipts are
-implemented, and core/API network mutations now consume them. Retrying a pending desired network requires exactly
-matching inputs. Missing root authority does not authorize cleanup of an interrupted local projection. System
-qualification remains pending.
+Public NAT intent selects Auto, None, or a named IPv4 interface and optional on-link next hop.
+Auto discovers eligible main-table IPv4 defaults and requires them to use the same interface.
+Named mode retains root-observed interface and route evidence. It installs scoped policy rules and
+a dedicated IPv4 default when a next hop is available. Local and more-specific main routes take
+precedence. Traffic cannot fall back to the host default. nftables admits general egress and
+masquerading only through the selected interface. None emits neither general egress nor NAT.
+Root reads back exact route, interface, and policy rule state before activation. Retry and removal
+use journaled identity. A missing record grants no authority to delete kernel state.
 
 Production topology preparation must consume the opaque child `TopologyHold` from the real Jailer VM lock and retain
 it, the namespace pin, and later firewall endpoint authority through active or retryable cleaning state. After all

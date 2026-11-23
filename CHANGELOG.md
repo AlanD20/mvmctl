@@ -166,8 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   artifacts. Invoking/system privileged protocol mismatch stops before effects.
 - Required cgroup v2 with the necessary controllers and kernel nftables bridge/inet, connection-tracking, and
   NAT support. Managed networks require non-overlapping RFC1918 prefixes with usable hosts (`/30` or larger).
-  Enabled NAT requires all eligible IPv4 main-table default routes to resolve to one uplink; caller-selected uplinks
-  are removed.
+  Choose automatic, disabled, or per-network NAT uplinks. A named interface can use an optional IPv4
+  next hop; mvmctl manages scoped egress routing through that interface.
 - Removed flat policy commands, `allow_remote_exec`/legacy VM-wide trust state, the `remote_vm` protocol,
   iptables/`nft` CLI backends and selectors, raw host-tool sudo grants, and public `run provision`/`run jailer`.
   Recreate typed traffic/exec grants; previously unrestricted managed peer traffic now starts denied.
