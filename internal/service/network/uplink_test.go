@@ -1,6 +1,7 @@
 package network
 
 import (
+	"encoding/binary"
 	"net/netip"
 	"slices"
 	"testing"
@@ -145,6 +146,28 @@ func TestObserveSelectedUplinkRejectsAmbiguousOrMissingAuthority(t *testing.T) {
 			assert.ErrorContains(t, err, test.wantErr)
 		})
 	}
+}
+
+// A second routing table can have a multipath default while Auto selects the main-table uplink.
+func TestObserveSelectedUplinkIgnoresDefaultsInOtherTables(t *testing.T) {
+	t.Parallel()
+
+	main := testRouteIPv4Message(t, testRouteMessageSpec{
+		destination: "0.0.0.0/0", gateway: "192.0.2.1", ifIndex: 10, table: unix.RT_TABLE_MAIN,
+		protocol: unix.RTPROT_STATIC, scope: unix.RT_SCOPE_UNIVERSE, kind: unix.RTN_UNICAST,
+	})
+	other := main
+	other.Data = appendTestRouteAttribute(t, slices.Clone(main.Data), netlink.Attribute{
+		Type: unix.RTA_TABLE, Data: binary.NativeEndian.AppendUint32(nil, 4000),
+	})
+	other.Data = appendTestRouteAttribute(t, other.Data, netlink.Attribute{Type: unix.RTA_MULTIPATH, Data: []byte{1}})
+	routes := []netlink.Message{other, main}
+	links := []netlink.Message{testRouteLinkMessage(t, "eth0", "external", 10, unix.IFF_UP, 0, 0, "veth", nil)}
+	adapter := testUplinkAdapter(t, &routes, &links)
+	selected, err := observeSelectedUplink(t.Context(), adapter, 41, namespaceIdentity{device: 5, inode: 300})
+	require.NoError(t, err)
+	assert.Equal(t, linkName("eth0"), selected.link.name)
+	assert.EqualValues(t, unix.RT_TABLE_MAIN, selected.route.table)
 }
 
 // Rationale: Admitting another route on the same uplink must not weaken retained route/link checks.

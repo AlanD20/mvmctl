@@ -202,14 +202,18 @@ func (adapter *directRouteNetlink) listDefaultIPv4Routes(
 		if reply.Data[0] != unix.AF_INET || reply.Data[1] != 0 || reply.Data[7] != unix.RTN_UNICAST {
 			continue
 		}
-		// Decode before filtering the table: RTA_TABLE can override the eight-bit header table.
+		table, err := ipv4RouteTable(reply.Data)
+		if err != nil {
+			return nil, err
+		}
+		if table != unix.RT_TABLE_MAIN {
+			continue
+		}
 		observation, err := decodeRouteIPv4Message(reply)
 		if err != nil {
 			return nil, err
 		}
-		if observation.table == unix.RT_TABLE_MAIN {
-			defaults = append(defaults, observation)
-		}
+		defaults = append(defaults, observation)
 	}
 	return defaults, nil
 }
