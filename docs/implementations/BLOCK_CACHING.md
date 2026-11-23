@@ -1,132 +1,92 @@
 # Block Device Caching Strategies
 
-## Problem
+Choose a cache mode according to your workload's durability needs. Guest synchronization and host storage durability
+are related, but they are not interchangeable guarantees.
 
-When a process inside the microVM writes data to a file, the data travels through several layers before reaching persistent storage: guest process → guest kernel page cache → VirtIO block device → Firecracker → host page cache → disk. Each layer may acknowledge the write before the data is actually on disk. If the VM is stopped immediately after a write-heavy operation, data in Firecracker's host page cache can be lost. Firecracker offers two caching strategies that determine when data is flushed to the backing file, and the vsock agent provides automatic synchronization after write operations.
+## Table of Contents
 
-## Architecture
+- [Current configuration](#current-configuration)
+- [Write path and cache modes](#write-path-and-cache-modes)
+- [Vsock agent synchronization](#vsock-agent-synchronization)
+- [Application and manual synchronization](#application-and-manual-synchronization)
+- [Key files](#key-files)
 
-```
-Guest process → Guest kernel page cache → VirtIO block device → Firecracker → Host page cache → Disk
-```
+## Current configuration
 
-The caching strategy determines when Firecracker flushes its internal buffer to the backing file. The vsock guest agent calls `unix.Sync()` after every `mvm exec` command and every `mvm cp` file transfer, unless `--no-sync` is passed.
+VM root disks default to `Unsafe`. Use `mvm vm create --writeback` or set
+`defaults.firecracker.drive_cache_type` to `Writeback` to enable guest-requested backing-file flushes.
+An explicit CLI flag overrides the configured default. Data volumes have their own cache setting;
+`defaults.volume.cache_type` defaults to `Unsafe`. The read-only cloud-init drive remains `Unsafe`.
 
-## Caching strategies
+These choices are resolved in `pkg/api/inputs/vm_create.go` and `pkg/api/inputs/volume_create.go`.
+The typed launch builder in `internal/service/jailer/managed_vm_config.go` writes each admitted drive's
+cache type into the Firecracker configuration.
 
-### Writeback (default)
+## Write path and cache modes
 
-When a block device is configured with `cache_type: Writeback`, Firecracker advertises the VirtIO `flush` feature to the guest driver. If the guest negotiates this feature, the guest kernel can send `VIRTIO_BLK_T_FLUSH` requests. When Firecracker receives a flush request, it calls `fsync(2)` on the backing file, committing all data in the host page cache to disk.
-
-```
-Guest process → Guest kernel page cache → VirtIO write (data acknowledged by Firecracker)
-                                                              ↓
-Guest sync() → VIRTIO_BLK_T_FLUSH → Firecracker fsync → Disk
-```
-
-**Integrity guarantee:** Once a flush request is acknowledged by Firecracker, the data is on physical storage.
-
-**Performance cost:** Each `sync()` syscall from the guest triggers an `fsync()` on the backing file.
-
-### Unsafe
-
-When configured with `cache_type: Unsafe`, Firecracker does NOT advertise the VirtIO `flush` feature. The guest `sync()` syscall becomes a no-op for the block device — Firecracker never `fsync`s the backing file. Data may remain in the host page cache indefinitely.
+Writes cross several independently buffered layers:
 
 ```
-Guest process → Guest kernel page cache → VirtIO write (data acknowledged by Firecracker)
-                                                              ↓
-Guest sync() → VIRTIO_BLK_T_FLUSH → ⛔ ignored by Firecracker → data stays in host page cache
+Guest process → guest page cache → VirtIO block device → host page cache → backing storage
 ```
 
-**Integrity risk:** If the host crashes or loses power, data in the host page cache is lost.
+Stopping the VM can lose dirty guest pages. A host crash or power loss can also lose dirty host pages;
+stopping Firecracker alone does not imply that the host page cache disappears.
 
-**Performance benefit:** Zero flush-related syscalls. Maximum throughput for ephemeral workloads.
+| Mode | Flush behavior | Intended tradeoff |
+|------|----------------|-------------------|
+| `Unsafe` (default) | Does not advertise the VirtIO flush feature | Fewer flush operations, without guest-requested host durability |
+| `Writeback` | Advertises VirtIO flush; an accepted guest flush causes backing-file `fsync` | Supports durability requests at additional I/O cost |
 
-## Vsock agent sync integration
+The guest must negotiate the flush feature. In Unsafe mode, guest synchronization still writes guest
+dirty pages toward the device; it is not a complete no-op, but cannot request the same backing-file flush.
+An acknowledged Writeback flush commits data according to the host storage stack's guarantees. It is
+not an application transaction or a guarantee against every hardware or filesystem failure.
+See the [Firecracker 1.17.0 caching contract](https://github.com/firecracker-microvm/firecracker/blob/v1.17.0/docs/api_requests/block-caching.md).
 
-The vsock guest agent automatically calls `unix.Sync()` after every `mvm exec` command (in `internal/service/agent/exec.go`) and after every `mvm cp` file transfer (in `internal/service/agent/file_transfer.go`), unless `--no-sync` is passed.
+## Vsock agent synchronization
 
-In **Writeback** mode (default), this ensures data reaches physical storage before the operation is considered complete. This prevents data loss when the VM is stopped immediately after a write-heavy operation.
+On its normal completion path, `handleExec()` calls `unix.Sync()` before sending the command result.
+The guest file-transfer push handler calls it before sending transfer DONE. Both skip that final call
+when `--no-sync` is requested. Early errors can return before synchronization.
 
-In **Unsafe** mode, the `sync()` call is still performed by the agent, but Firecracker ignores it, so it's effectively a no-op.
-
-## CLI flags
-
-Both `mvm cp` and `mvm exec` support `--no-sync` to skip the automatic `unix.Sync()` call:
+This push behavior covers files received by the guest, not every `mvm cp` direction: the guest pull
+handler streams files out without that final guest-wide sync.
 
 ```bash
-# Skip sync after file transfer (faster, riskier)
+# Skip final guest sync after receiving files
 mvm cp --no-sync ./file.txt my-vm:/path/
 
-# Skip sync after command
+# Skip final guest sync after command execution
 mvm exec --no-sync my-vm -- echo quick
 ```
 
-Without `--no-sync`, the agent calls `unix.Sync()` automatically, which:
-1. Flushes the guest kernel page cache to the VirtIO block device
-2. Sends `VIRTIO_BLK_T_FLUSH` to Firecracker
-3. Causes Firecracker to `fsync()` the backing file
-4. Ensures data is on physical storage before the command returns
+The final sync helps drain guest writes before completion; it does not upgrade an Unsafe drive to
+Writeback or report an application-specific durability verdict. For a normal successful exec without
+`--no-sync`, a second `mvm exec my-vm -- sync` is redundant with the agent's final sync.
 
-## When to use each mode
+## Application and manual synchronization
 
-| Mode | Use case | Data integrity |
-|------|----------|----------------|
-| **Writeback** (default) | Persistent VMs, databases, file servers, any workload where data matters | Full integrity — sync() guarantees data on disk |
-| **Unsafe** | Ephemeral VMs, CI runners, serverless, scratch compute | No integrity — data lost on host crash |
+For writes performed outside the agent, such as through SSH, synchronize before stopping the VM.
+Choose a scope appropriate to the application:
 
-## Manual sync
+| Method | Scope |
+|--------|-------|
+| `fsync(fd)` | File data and metadata; synchronizes device caches as supported by the stack |
+| `syncfs(fd)` | The filesystem containing the referenced file |
+| `sync` | Filesystems across the guest |
 
-For files written via other methods (SSH, direct processes inside the VM), sync manually before stopping the VM:
-
-### 1. `sync` — flush everything (recommended)
-
-```bash
-sync
-```
-
-Calls `sync(2)` which sends `VIRTIO_BLK_T_FLUSH` to all block devices, causing Firecracker to `fsync()` all backing files.
-
-### 2. `fsync` — flush a single file
-
-```bash
-fsync(fd)
-```
-
-Flushes a single file's data through the guest kernel to Firecracker. In Writeback mode, this ensures the data reaches Firecracker's host page cache — but does NOT trigger `VIRTIO_BLK_T_FLUSH`, so Firecracker may not yet have written it to the backing file.
-
-### 3. `syncfs` — flush a single filesystem
-
-```bash
-syncfs(fd_of_mount)
-```
-
-Like `sync` but scoped to a single mounted filesystem. Sends flush to the block device(s) backing that mount only.
-
-| Method | Scope | Flushes Firecracker? | Use case |
-|--------|-------|---------------------|----------|
-| `fsync(fd)` | Single file | (writes data to Firecracker, but no flush) | Application-level durability |
-| `syncfs(fd)` | One filesystem | Triggers VIRTIO_BLK_T_FLUSH on backing device | Targeted sync before stopping a specific volume |
-| `sync` | All filesystems | Triggers flush on ALL block devices | Best practice before stopping the VM |
-
-### In scripts
-
-```bash
-#!/bin/sh
-mvm exec my-vm -- /setup.sh
-mvm exec my-vm -- sync        # ensure data is on disk
-mvm vm stop my-vm
-```
-
-Without the explicit `sync`, files written by `/setup.sh` could be lost in Firecracker's host page cache when the VM stops.
+Guest `fsync` is not categorically limited to copying data into the host cache. Its durability behavior
+depends on the guest filesystem and negotiated device flush support. Persisting a new or renamed
+directory entry may also require syncing the containing directory. Applications should check errors
+from their own synchronization calls.
+See [Linux fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html).
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `internal/service/agent/exec.go` | `handleExec()` — calls `unix.Sync()` after command execution |
-| `internal/service/agent/file_transfer.go` | `handleFTPush()` — calls `unix.Sync()` after file transfer |
-
-## References
-
-- [Firecracker block-caching documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/api_requests/block-caching.md)
+| `internal/service/agent/exec.go` | Final guest sync before the normal exec result |
+| `internal/service/agent/file_transfer.go` | Guest push synchronization and pull streaming |
+| `pkg/api/inputs/vm_create.go` | Root-disk Writeback selection |
+| `internal/service/jailer/managed_vm_config.go` | Admitted drive cache configuration |

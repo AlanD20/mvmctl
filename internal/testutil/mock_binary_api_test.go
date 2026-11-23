@@ -28,7 +28,7 @@ func TestMockBinaryAPI_DefaultReturnsNil(t *testing.T) {
 	})
 
 	t.Run("BinaryRemove_returns_nil", func(t *testing.T) {
-		result := m.BinaryRemove(ctx, inputs.BinaryInput{}, false)
+		result := m.BinaryRemove(ctx, inputs.BinaryRemoveInput{}, false)
 		assert.Nil(t, result)
 	})
 

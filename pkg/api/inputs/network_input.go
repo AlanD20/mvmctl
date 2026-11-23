@@ -31,7 +31,7 @@ func (i *NetworkInput) Resolve(ctx context.Context, repo network.Repository) ([]
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
-	resolver := network.NewResolver(repo, []string{"leases"})
+	resolver := network.NewResolver(repo)
 	result, err := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if err != nil {
 		return nil, errs.New(errs.CodeNetworkNotFound, err.Error())

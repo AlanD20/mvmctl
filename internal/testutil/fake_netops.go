@@ -16,9 +16,6 @@ type FakeNetOps struct {
 	GetTapBridgeFn     func(ctx context.Context, tap string) string
 	GetBridgeSlavesFn  func(ctx context.Context, bridge string) []string
 	GetSystemBridgesFn func(ctx context.Context) []string
-	RunBatchFn         func(ctx context.Context, commands []string) error
-	RemoveRawTapFn     func(ctx context.Context, tap string) error
-	RemoveRawBridgeFn  func(ctx context.Context, bridge string) error
 }
 
 func (f *FakeNetOps) BridgeExists(ctx context.Context, bridge string) bool {
@@ -66,27 +63,6 @@ func (f *FakeNetOps) GetBridgeSlaves(ctx context.Context, bridge string) []strin
 func (f *FakeNetOps) GetSystemBridges(ctx context.Context) []string {
 	if f.GetSystemBridgesFn != nil {
 		return f.GetSystemBridgesFn(ctx)
-	}
-	return nil
-}
-
-func (f *FakeNetOps) RunBatch(ctx context.Context, commands []string) error {
-	if f.RunBatchFn != nil {
-		return f.RunBatchFn(ctx, commands)
-	}
-	return nil
-}
-
-func (f *FakeNetOps) RemoveRawTap(ctx context.Context, tap string) error {
-	if f.RemoveRawTapFn != nil {
-		return f.RemoveRawTapFn(ctx, tap)
-	}
-	return nil
-}
-
-func (f *FakeNetOps) RemoveRawBridge(ctx context.Context, bridge string) error {
-	if f.RemoveRawBridgeFn != nil {
-		return f.RemoveRawBridgeFn(ctx, bridge)
 	}
 	return nil
 }

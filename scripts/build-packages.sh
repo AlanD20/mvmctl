@@ -104,7 +104,7 @@ Section: utils
 Priority: optional
 Architecture: ${pkgarch}
 Maintainer: AlanD20 <aland20@pm.me>
-Depends: iproute2, iptables, nftables, qemu-utils, openssh-client, e2fsprogs, util-linux, passwd, sudo, procps, kmod, tar, fakeroot
+Depends: iproute2, qemu-utils, openssh-client, e2fsprogs, util-linux, passwd, sudo, procps, kmod, tar, fakeroot
 Recommends: cloud-image-utils, libguestfs-tools | guestfs-tools
 Description: MicroVM Manager - Container speed, VM isolation
  mvmctl is a production-grade CLI for managing microVMs on Linux.
@@ -200,7 +200,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/AlanD20/mvmctl"
 license=('MIT')
 depends=(
-  'iproute2' 'nftables' 'iptables'
+  'iproute2'
   'qemu-base'
   'openssh'
   'e2fsprogs' 'util-linux'

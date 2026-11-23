@@ -476,7 +476,7 @@ def download_assets(target_dir: Path) -> None:
 
     print_info("Downloading Firecracker binary...")
     result = run_cmd(
-        ["uv", "run", "mvm", "bin", "pull", "1.15.1", "--default"],
+        ["uv", "run", "mvm", "bin", "pull", "firecracker:1.15.1", "--default"],
         workdir=str(target_dir),
         description="Fetch Firecracker binary",
         check=False,

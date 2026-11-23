@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
@@ -164,7 +165,7 @@ func (kd *KernelDetector) extractVersion(ctx context.Context, kernelPath string)
 	result, err := system.DefaultRunner.Run(ctx, []string{"file", kernelPath}, system.RunCmdOpts{
 		Capture: true,
 		Check:   false,
-		Timeout: 5000,
+		Timeout: 5 * time.Second,
 	})
 	if err != nil {
 		// Check for timeout — return a specific error message.

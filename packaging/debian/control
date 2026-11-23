@@ -10,8 +10,6 @@ Package: mvmctl
 Architecture: amd64 arm64
 Depends: ${shlibs:Depends}, ${misc:Depends},
  iproute2,
- iptables,
- nftables,
  qemu-utils,
  openssh-client,
  e2fsprogs,

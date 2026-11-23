@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -127,24 +126,13 @@ func WritePIDFile(path string, pid int, mode ...os.FileMode) error {
 
 // --- Real user ID resolution (for sudo chown) ---
 
-// GetRealUserIDs returns (uid, gid) of the real invoking user when running
-// under sudo. Returns nil if not running as root, or if SUDO_USER is not set
-// or cannot be resolved.
+// GetRealUserIDs returns (uid, gid) of a complete, UID-bound sudo identity.
 func GetRealUserIDs() (uid, gid int, ok bool) {
-	if os.Getuid() != 0 {
+	identity, sudo, err := resolveSudoUserIdentity(realDefaultUserDirDeps())
+	if err != nil || !sudo {
 		return 0, 0, false
 	}
-	sudoUser := os.Getenv("SUDO_USER")
-	if sudoUser == "" {
-		return 0, 0, false
-	}
-	u, err := user.Lookup(sudoUser)
-	if err != nil {
-		return 0, 0, false
-	}
-	uid, _ = strconv.Atoi(u.Uid)
-	gid, _ = strconv.Atoi(u.Gid)
-	return uid, gid, true
+	return int(identity.uid), int(identity.gid), true
 }
 
 // ChownToRealUser recursively chowns a path to the real invoking user when

@@ -15,8 +15,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"mvmctl/pkg/errs"
 )
 
 // --- prettifyKey ---
@@ -151,70 +149,6 @@ func TestParseTime(t *testing.T) {
 			assert.True(t, ok)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("parseTime() mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-// --- isNotFoundCode ---
-// Rationale: isNotFoundCode controls the "not found" branch in FormatError and
-// HandleErrors. A false negative would display raw code strings instead of
-// user-friendly "entity not found" messages.
-
-func TestIsNotFoundCode(t *testing.T) {
-	tests := map[string]struct {
-		input errs.Code
-		want  bool
-	}{
-		// False cases FIRST
-		"empty":                   {input: "", want: false},
-		"success_code":            {input: "vm.created", want: false},
-		"already_exists":          {input: "vm.already_exists", want: false},
-		"partial_suffix_no_match": {input: "vm.not_found.extra", want: false},
-		"no_dot_prefix":           {input: "ismissing", want: false},
-
-		// True cases
-		"vm_not_found":      {input: errs.CodeVMNotFound, want: true},
-		"network_not_found": {input: errs.CodeNetworkNotFound, want: true},
-		"bare_not_found":    {input: "not_found", want: true},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := isNotFoundCode(tc.input)
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("isNotFoundCode() mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-// --- isAlreadyExistsCode ---
-// Rationale: isAlreadyExistsCode controls the "already exists" branch in
-// FormatError. A false negative would display raw code strings instead of
-// user-friendly "entity already exists" messages.
-
-func TestIsAlreadyExistsCode(t *testing.T) {
-	tests := map[string]struct {
-		input errs.Code
-		want  bool
-	}{
-		// False cases FIRST
-		"empty":                   {input: "", want: false},
-		"not_found":               {input: "vm.not_found", want: false},
-		"partial_suffix_no_match": {input: "vm.already_exists.extra", want: false},
-
-		// True cases
-		"vm_already_exists":      {input: errs.CodeVMAlreadyExists, want: true},
-		"network_already_exists": {input: errs.CodeNetworkAlreadyExists, want: true},
-		"bare_already_exists":    {input: "already_exists", want: true},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := isAlreadyExistsCode(tc.input)
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("isAlreadyExistsCode() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -366,58 +300,6 @@ func TestFormatID(t *testing.T) {
 			}
 		})
 	}
-}
-
-// --- MarshalJSONDefaultStr ---
-// Rationale: MarshalJSONDefaultStr is used by the API layer to serialise
-// responses. A regression could cause empty output "{}" for valid data or
-// crash on non-serialisable types.
-
-func TestMarshalJSONDefaultStr(t *testing.T) {
-	t.Run("nil_returns_null", func(t *testing.T) {
-		got := MarshalJSONDefaultStr(nil)
-		want := "null"
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Errorf("MarshalJSONDefaultStr(nil) mismatch (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("struct_returns_json", func(t *testing.T) {
-		v := struct {
-			Name  string `json:"name"`
-			Value int    `json:"value"`
-		}{Name: "test", Value: 42}
-		got := MarshalJSONDefaultStr(v)
-		want := "{\n  \"name\": \"test\",\n  \"value\": 42\n}"
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Errorf("MarshalJSONDefaultStr(struct) mismatch (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("string_returns_quoted", func(t *testing.T) {
-		got := MarshalJSONDefaultStr("hello")
-		want := "\"hello\""
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Errorf("MarshalJSONDefaultStr(string) mismatch (-want +got):\n%s", diff)
-		}
-	})
-
-	t.Run("map_with_unserializable_fallback", func(t *testing.T) {
-		// A map containing a channel cannot be marshalled directly;
-		// the fallback converts the channel to its string representation.
-		v := map[string]any{"key": "value", "ch": make(chan int)}
-		got := MarshalJSONDefaultStr(v)
-		assert.Contains(t, got, "\"key\": \"value\"")
-		assert.Contains(t, got, "\"ch\": ")
-	})
-
-	t.Run("integer_returns_number", func(t *testing.T) {
-		got := MarshalJSONDefaultStr(42)
-		want := "42"
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Errorf("MarshalJSONDefaultStr(int) mismatch (-want +got):\n%s", diff)
-		}
-	})
 }
 
 // --- isBrokenPipe ---

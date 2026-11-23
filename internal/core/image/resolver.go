@@ -10,18 +10,6 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// RELATIONS defines the cross-domain relations for image enrichment.
-var RELATIONS = map[string]model.RelationSpec{
-	"vm": {
-		FKField:      "id",
-		Resolver:     "vm",
-		Method:       "by_image_id",
-		RelationName: "vms",
-		IsReverse:    true,
-		BatchMethod:  "by_image_id_batch",
-	},
-}
-
 // ResolveResult holds the result of a batch image resolution.
 type ResolveResult struct {
 	Items    []*model.ImageItem
@@ -29,39 +17,14 @@ type ResolveResult struct {
 	ExitCode int
 }
 
-// EnrichFunc is a function that enriches images in-place with relations.
-// Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, images []*model.ImageItem, include []string, relations map[string]model.RelationSpec)
-
 // Resolver resolves images by ID, type:version, type, name, or ID prefix.
 type Resolver struct {
-	repo       Repository
-	include    []string
-	enrichFunc EnrichFunc
+	repo Repository
 }
 
 // NewResolver creates a new Resolver.
 func NewResolver(repo Repository) *Resolver {
 	return &Resolver{repo: repo}
-}
-
-// SetEnrichFunc sets the enrichment function called after each resolution.
-// Must be set for cross-domain relation enrichment (e.g., populating VMs).
-func (r *Resolver) SetEnrichFunc(fn EnrichFunc) {
-	r.enrichFunc = fn
-}
-
-// enrich enriches images with relations if include is set.
-func (r *Resolver) enrich(ctx context.Context, images []*model.ImageItem) []*model.ImageItem {
-	if r.include != nil && len(images) > 0 && r.enrichFunc != nil {
-		r.enrichFunc(ctx, images, r.include, RELATIONS)
-	}
-	return images
-}
-
-// SetInclude sets the relation names to include during resolution.
-func (r *Resolver) SetInclude(include []string) {
-	r.include = include
 }
 
 // ByID resolves by full ID.
@@ -76,7 +39,7 @@ func (r *Resolver) ByID(ctx context.Context, imageID string, includeDeleted ...b
 	if len(matches) > 1 {
 		return nil, errs.NotFound(errs.CodeImageNotFound, fmt.Sprintf("Image ID is ambiguous: '%s'", imageID))
 	}
-	return r.enrich(ctx, matches)[0], nil
+	return matches[0], nil
 }
 
 // ByVersionType resolves by version and type (both required).
@@ -91,7 +54,7 @@ func (r *Resolver) ByVersionType(ctx context.Context, version, imgType string) (
 			fmt.Sprintf("Image not found: version='%s', type='%s'", version, imgType),
 		)
 	}
-	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
+	return dbImage, nil
 }
 
 // ByType resolves by image type.
@@ -103,7 +66,7 @@ func (r *Resolver) ByType(ctx context.Context, imgType string) (*model.ImageItem
 	if dbImage == nil {
 		return nil, errs.NotFound(errs.CodeImageNotFound, fmt.Sprintf("Image not found: '%s'", imgType))
 	}
-	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
+	return dbImage, nil
 }
 
 // GetDefault resolves the default image, or nil if not set.
@@ -115,7 +78,7 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.ImageItem, error) {
 	if image == nil {
 		return nil, nil
 	}
-	return r.enrich(ctx, []*model.ImageItem{image})[0], nil
+	return image, nil
 }
 
 // ByName resolves by display name.
@@ -127,7 +90,7 @@ func (r *Resolver) ByName(ctx context.Context, name string, includeDeleted ...bo
 	if dbImage == nil {
 		return nil, errs.NotFound(errs.CodeImageNotFound, fmt.Sprintf("Image not found by name: '%s'", name))
 	}
-	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
+	return dbImage, nil
 }
 
 // isImageNotFoundError checks if the error is an ImageNotFoundError
@@ -200,8 +163,6 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string, includ
 			items = append(items, item)
 		}
 	}
-
-	items = r.enrich(ctx, items)
 
 	exitCode := 0
 	if len(errorsList) > 0 && len(items) == 0 {

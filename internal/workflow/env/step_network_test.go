@@ -129,6 +129,7 @@ func TestNetworkStep_Apply(t *testing.T) {
 			wantNetworkID:  "net-existing",
 			wantSubnet:     "10.0.0.0/24",
 			wantWasCreated: false, // WasCreated defaults to false on fresh run
+			wantErr:        "resource already exists",
 		},
 		"already_exists_preserves_was_created_from_saved": {
 			setupAPI: func(_ *testing.T) api.NetworkAPI {
@@ -145,7 +146,8 @@ func TestNetworkStep_Apply(t *testing.T) {
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
-				Meta: model.ResourceMeta{WasCreated: true},
+				Output: model.ResourceMap{"network_id": "net-preserved"},
+				Meta:   model.ResourceMeta{WasCreated: true},
 			},
 			wantNetworkID:  "net-preserved",
 			wantSubnet:     "10.0.1.0/24",
@@ -161,6 +163,9 @@ func TestNetworkStep_Apply(t *testing.T) {
 			state := workflow.NewSharedState()
 			writer, writes := recordingWriter()
 
+			if tc.saved.Output != nil {
+				tc.saved.Meta.SpecHash = step.SpecHash()
+			}
 			err := step.Apply(tc.ctx(), state, tc.saved, writer, noopProgress)
 
 			if tc.wantErr != "" {
@@ -215,7 +220,10 @@ func TestNetworkStep_Apply_WriteFailure(t *testing.T) {
 	err := step.Apply(
 		context.Background(),
 		workflow.NewSharedState(),
-		model.ResourceState{},
+		model.ResourceState{
+			Output: model.ResourceMap{"network_id": "net-1"},
+			Meta:   model.ResourceMeta{SpecHash: step.SpecHash()},
+		},
 		failingWriter(writeErr),
 		noopProgress,
 	)
@@ -381,6 +389,9 @@ func TestNetworkStep_Destroy_WriteFailure(t *testing.T) {
 func TestNetworkStep_Destroy_NetworkInputParams(t *testing.T) {
 	var capturedInput inputs.NetworkInput
 	mockAPI := &testutil.MockNetworkAPI{
+		NetworkGetFunc: func(context.Context, inputs.NetworkInput) (*model.NetworkItem, error) {
+			return &model.NetworkItem{ID: "net-destroy-test"}, nil
+		},
 		NetworkRemoveFunc: func(_ context.Context, input inputs.NetworkInput, _ bool) error {
 			capturedInput = input
 			return nil
@@ -413,12 +424,7 @@ func TestNetworkStep_Destroy_NetworkInputParams(t *testing.T) {
 		"NetworkRemove must be called with Force: true")
 }
 
-// --- NetworkStep.Destroy soft-deleted orphan cleanup ---
-// Rationale: When two specs share a network, one spec's destroy may
-// soft-delete the network (because the other spec's VMs still use it).
-// When the last spec destroys, WasCreated=false so the existing logic
-// skips removal — but the network is a soft-deleted orphan that should
-// be cleaned up. Destroy now checks IsPresent and removes if soft-deleted.
+// Rationale: Soft deletion never transfers ownership to a workflow that merely used the network.
 
 func TestNetworkStep_Destroy_SoftDeletedOrphan(t *testing.T) {
 	var capturedInput inputs.NetworkInput
@@ -455,11 +461,8 @@ func TestNetworkStep_Destroy_SoftDeletedOrphan(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, *writes, 1, "state must be written exactly once")
 
-	assert.True(t, networkGetCalled, "NetworkGet must be called to check soft-delete status")
-	assert.Equal(t, []string{"net-orphan"}, capturedInput.Identifiers,
-		"NetworkRemove must be called with the orphan's network ID")
-	assert.True(t, capturedInput.IncludeDeleted,
-		"NetworkRemove must be called with IncludeDeleted: true")
+	assert.False(t, networkGetCalled, "foreign resources need no cleanup lookup")
+	assert.Empty(t, capturedInput.Identifiers, "foreign soft-deleted network must not be removed")
 }
 
 func TestNetworkStep_Destroy_SkipActivePreExisting(t *testing.T) {
@@ -495,7 +498,7 @@ func TestNetworkStep_Destroy_SkipActivePreExisting(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, *writes, 1, "state must be written exactly once")
 
-	assert.True(t, networkGetCalled, "NetworkGet must be called to check soft-delete status")
+	assert.False(t, networkGetCalled, "foreign resources need no cleanup lookup")
 	assert.False(t, networkRemoveCalled,
 		"NetworkRemove must NOT be called for an active pre-existing network")
 }
@@ -581,14 +584,14 @@ func TestNetworkStep_StateData(t *testing.T) {
 }
 
 // --- NetworkStep.FromSpec NAT default ---
-// Rationale: The network step defaults NATEnabled to true when the "nat" key
+// Rationale: The network step defaults NATEnabled to true when the "nat_enabled" key
 // is absent from the spec. This matches the production default and prevents
 // silent network misconfiguration if the default changes.
 
 func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 	dummyOp := &api.Operation{}
 
-	t.Run("nat_key_absent_produces_nonempty_deterministic_hash", func(t *testing.T) {
+	t.Run("nat_enabled_absent_produces_nonempty_deterministic_hash", func(t *testing.T) {
 		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24"}
 		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
@@ -601,21 +604,21 @@ func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 			"identical specs must produce identical hashes")
 	})
 
-	t.Run("nat_key_false_produces_different_hash", func(t *testing.T) {
-		specTrue := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": true}
+	t.Run("nat_enabled_false_produces_different_hash", func(t *testing.T) {
+		specTrue := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat_enabled": true}
 		stepTrue, err := envpkg.Registry["network"].FromSpec("network", "test-net", specTrue, dummyOp)
 		require.NoError(t, err)
 
-		specFalse := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": false}
+		specFalse := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat_enabled": false}
 		stepFalse, err := envpkg.Registry["network"].FromSpec("network", "test-net", specFalse, dummyOp)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, stepTrue.SpecHash(), stepFalse.SpecHash(),
-			"nat=false must produce a different SpecHash than nat=true")
+			"nat_enabled=false must produce a different SpecHash than nat_enabled=true")
 	})
 
 	t.Run("spec_hash_is_deterministic", func(t *testing.T) {
-		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": true}
+		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat_enabled": true}
 		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 
@@ -737,20 +740,9 @@ func (a *repoNetworkAPI) NetworkCreateDefaultNetwork(_ context.Context) (*model.
 	return nil, errors.New("not implemented in test wrapper")
 }
 
-// --- NetworkStep.Destroy hard-delete of soft-deleted orphan ---
-// Rationale: When two specs share a network, one spec's destroy may
-// soft-delete the network (because the other spec's VMs still use it).
-// When the last spec destroys, WasCreated=false so the existing skip logic
-// would normally skip — but the network is a soft-deleted orphan that
-// should be hard-deleted. This test proves the destruction actually
-// removes the record from the SQLite database entirely.
-//
-// Contrast with TestNetworkStep_Destroy_SoftDeletedOrphan (above), which
-// tests the step logic using mocks. This test uses a real SQLite database
-// and real repository to verify the hard-delete actually propagates to
-// the DB layer.
+// Rationale: Real SQLite readback must prove foreign soft-deleted networks survive cleanup.
 
-func TestNetworkStep_Destroy_HardDeletesSoftDeleted(t *testing.T) {
+func TestNetworkStep_Destroy_PreservesForeignSoftDeleted(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewInMemoryDB(t)
 	repo := network.NewRepository(db)
@@ -796,16 +788,18 @@ func TestNetworkStep_Destroy_HardDeletesSoftDeleted(t *testing.T) {
 
 	writer, writes := recordingWriter()
 
-	// 4. Call Destroy — the step should detect the soft-deleted orphan
-	//    and issue a NetworkRemove, which hard-deletes from the DB.
+	// 4. Destroy must preserve the foreign network even though it is soft-deleted.
 	err = step.Destroy(ctx, saved, writer, noopProgress)
 	require.NoError(t, err)
 	require.Len(t, *writes, 1, "state must be written exactly once")
 
-	// 5. Verify hard-delete — even with includeDeleted=true, no rows returned.
+	// 5. Independently read the preserved identity and deletion state.
 	items, err = repo.FindByPrefix(ctx, networkID, true)
 	require.NoError(t, err)
-	require.Len(t, items, 0, "soft-deleted network must be hard-deleted from DB")
+	require.Len(t, items, 1, "foreign network must remain in DB")
+	assert.Equal(t, networkID, items[0].ID)
+	assert.NotNil(t, items[0].DeletedAt)
+	assert.False(t, items[0].IsPresent)
 }
 
 // --- NetworkStep.FromState state recovery ---

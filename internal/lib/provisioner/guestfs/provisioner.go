@@ -23,12 +23,13 @@ var pc = provcontent.Builder{}
 // ProvisioningConfig describes an entire provisioning operation.
 // Pass to RunDeferred — no builder pattern, one shot, two guestfish sessions.
 type ProvisioningConfig struct {
-	RootfsPath string
-	Readonly   bool
-	RootUID    int
-	RootGID    int
-	UserUID    int
-	UserGID    int
+	GuestControlAgent []byte // Sensitive agent-only material; never command text or a public result.
+	RootfsPath        string
+	Readonly          bool
+	RootUID           int
+	RootGID           int
+	UserUID           int
+	UserGID           int
 
 	// Operations (zero-value = skip)
 	TargetSize       int64                   // resize target, 0 = no resize
@@ -60,7 +61,7 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 	}
 	hasOps := cfg.Hostname != "" || cfg.DNSServer != "" || len(cfg.SSHPubkeys) > 0 ||
 		cfg.CloudInitDir != "" || cfg.DisableCloudInit || cfg.Shrink || cfg.Deblob || cfg.FixFstab
-	if !needsResize && !hasOps {
+	if !needsResize && !hasOps && len(cfg.GuestControlAgent) == 0 {
 		return nil
 	}
 
@@ -292,6 +293,16 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 		}
 	}
 
+	if len(cfg.GuestControlAgent) != 0 {
+		temporary := filepath.Join(tmpDir, "guest-control-agent.json")
+		if err := os.WriteFile(temporary, cfg.GuestControlAgent, 0600); err != nil {
+			return nil, fmt.Errorf("write Guest Control agent provisioning file: %w", err)
+		}
+		cmds = append(cmds, "mkdir-p "+infra.GuestAgentConfigDirectory, "chmod 0700 "+infra.GuestAgentConfigDirectory,
+			"chown 0 0 "+infra.GuestAgentConfigDirectory,
+			fmt.Sprintf("upload %s %s", temporary, infra.GuestControlAgentMaterialPath),
+			"chmod 0600 "+infra.GuestControlAgentMaterialPath, "chown 0 0 "+infra.GuestControlAgentMaterialPath)
+	}
 	cmds = append(cmds, "sync")
 	cmds = append(cmds, "# END")
 	return cmds, nil

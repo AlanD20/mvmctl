@@ -56,11 +56,27 @@ func (s *KeyStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
+	lookup := s.input.Name
+	prior := StateFromMap[KeyState](saved.Output)
+	if saved.Output != nil {
+		if prior == nil || prior.KeyID == "" {
+			return fmt.Errorf("%s: saved resource identity is invalid", s.Name())
+		}
+		if saved.Meta.SpecHash != s.specHash {
+			return fmt.Errorf(
+				"%s: declaration changed; destroy the saved resource before changing its declaration",
+				s.Name(),
+			)
+		}
+		lookup = prior.KeyID
+	} else if selected := s.inputSpec.GetString("existing"); selected != "" {
+		lookup = selected
+	}
 	// Recover WasCreated from saved meta.
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.KeyGet(ctx, inputs.KeyInput{Identifiers: []string{s.input.Name}})
+	existing, err := s.op.KeyGet(ctx, inputs.KeyInput{Identifiers: []string{lookup}})
 	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
@@ -68,7 +84,16 @@ func (s *KeyStep) Apply(
 			err,
 		)
 	}
+	if prior != nil && (existing == nil || existing.ID != prior.KeyID) {
+		return fmt.Errorf("%s: saved resource %s is missing; refusing replacement", s.Name(), prior.KeyID)
+	}
+	if s.inputSpec.GetString("existing") != "" && existing == nil {
+		return fmt.Errorf("%s: selected existing resource was not found", s.Name())
+	}
 	if existing != nil {
+		if prior == nil && s.inputSpec.GetString("existing") == "" {
+			return fmt.Errorf("%s: resource already exists; select it explicitly with existing", s.Name())
+		}
 		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
 		s.saved = &KeyState{
 			KeyID: existing.ID,
@@ -123,6 +148,9 @@ func (s *KeyStep) Destroy(
 		s.meta = saved.Meta
 	}
 
+	if s.meta.WasCreated && (s.saved == nil || s.saved.KeyID == "") {
+		return fmt.Errorf("%s: owned key identity is missing", s.Name())
+	}
 	if s.saved == nil || !s.meta.WasCreated {
 		if err := write(ctx, s.StateData()); err != nil {
 			return fmt.Errorf("persist step state after destroy skip: %w", err)
@@ -130,6 +158,19 @@ func (s *KeyStep) Destroy(
 		return nil
 	}
 
+	item, err := s.op.KeyGet(ctx, inputs.KeyInput{Identifiers: []string{s.saved.KeyID}})
+	if err != nil {
+		if errs.IsNotFound(err) {
+			return write(ctx, s.StateData())
+		}
+		return err
+	}
+	if item == nil {
+		return write(ctx, s.StateData())
+	}
+	if item.ID != s.saved.KeyID {
+		return fmt.Errorf("%s: saved key identity does not match resolved resource", s.Name())
+	}
 	result := s.op.KeyRemove(ctx, inputs.KeyInput{
 		Identifiers: []string{s.saved.KeyID},
 	}, true)

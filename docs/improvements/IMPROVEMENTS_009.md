@@ -1,6 +1,11 @@
 # Daemonless Production Readiness — Host Capacity Detection, Events & Admission Control
 
-> **STATUS: Partially implemented (host detection ✅, everything else ❌).**
+> **STATUS: Historical proposal and 2026-06-27 status snapshot.** The table and implementation descriptions below
+> retain the earlier design. Current root-authoritative status reconciliation is implemented; host administration
+> uses the typed root-owned boundary rather than the former host service helpers. See [CONTEXT.md](../../CONTEXT.md),
+> [ADR-0016](../adr/0016-root-owned-single-binary-privileged-dispatch.md), and the
+> [coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md). Proposed SQLite capacity reservations and sysctl
+> memory tuning are not the current [pressure-only memory policy](../adr/0019-pressure-only-vm-memory-control.md).
 >
 > | Section | Status |
 > |---------|--------|
@@ -10,7 +15,7 @@
 > | Resource accounting table + admission control | ❌ Not implemented — no `resource_accounting` or `vm_resource_allocations` tables in schema |
 > | Event log table + `mvm events` command | ❌ Not implemented — no `event_log` table in schema, no events CLI command. Audit logging exists (`internal/lib/logging/audit.go`) but writes flat file, not queryable event table. |
 > | Rate-limited VM creation | ❌ Not implemented — no semaphore/concurrency limiter in VM creation pipeline |
-> | `mvm host reconcile` for crash recovery | ❌ Not implemented — no such CLI command exists |
+> | Root-authoritative crash/status reconciliation | ❌ Not implemented — promoted to v0.3.0 Task 15 |
 > | sysctl tuning in `mvm host init` | ⚠️ Partial — `EnableIPForward()` + `PersistSysctl()` write `net.ipv4.ip_forward=1`. No tier system or multi-sysctl profile. |
 > | WAL checkpointing + backup rotation | ❌ Not implemented — no periodic checkpoint or snapshot rotation logic |
 >
@@ -157,13 +162,19 @@ Default: 5 concurrent creates. Configurable via `settings.max_parallel_vm_create
 
 ---
 
-## 6. Crash Recovery (`mvm host reconcile`) (Not Implemented)
+## 6. Crash and status reconciliation (Not Implemented)
 
-Scans for three types of orphaned state:
+The v0.3.0 design in ADR-0016 and `tasks/plan.md` supersedes the original user-database/PID scan proposed here. Root
+authority verifies boot ID and complete process identity. `mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` reconcile in
+bounded batches before filtering or rendering, so a host reboot cannot leave a VM displayed as running.
+
+This is not a guest heartbeat. List commands do not dial Firecracker, SSH, or the vsock agent, and they do not start one
+sudo process or goroutine per VM. Guest readiness remains the responsibility of the command that needs it. The original
+orphan classes remain part of the broader reconciliation operation:
 
 | Phase | What It Checks | Action |
 |-------|---------------|--------|
-| 1 | Running VMs with dead PIDs | Mark as `crashed`, release resources |
+| 1 | Authority records with no verified live process | Reconcile observed status and recover owned resources |
 | 2 | Active network leases with no VM | Release lease back to pool |
 | 3 | TAP devices not owned by any VM | Delete TAP via `system.RunCmd` |
 

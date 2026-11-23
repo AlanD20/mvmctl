@@ -57,7 +57,20 @@ func (s *SSHStep) Apply(
 	fmt.Println()
 	// Wrap onProgress to inject step name into SSH output events.
 	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
-	if err := s.op.SSHConnect(ctx, s.input, stepProgress); err != nil {
+	input := s.input
+	var err error
+	input.Identifier, err = resolveResourceReference(state, input.Identifier)
+	if err != nil {
+		return err
+	}
+	if input.Key != nil {
+		key, err := resolveResourceReference(state, *input.Key)
+		if err != nil {
+			return err
+		}
+		input.Key = &key
+	}
+	if err := s.op.SSHConnect(ctx, input, stepProgress); err != nil {
 		return err
 	}
 	cmd := ""
@@ -119,13 +132,6 @@ func newSSHStepFromSpec(
 ) (workflow.Step, error) {
 	if op == nil {
 		return nil, errors.New("operation not initialized")
-	}
-
-	// Strip "type:" prefix from step reference fields.
-	for _, ref := range []string{"target", "key"} {
-		if s, ok := spec[ref].(string); ok {
-			spec[ref] = stripBareName(s)
-		}
 	}
 
 	data, err := yaml.Marshal(spec)

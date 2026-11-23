@@ -1,8 +1,10 @@
 package env
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -39,8 +41,7 @@ type EnvSpec struct {
 // stripRefPrefix strips the "@" sigil from a single value. In v2 format,
 // all cross-resource references use "@type:name" (e.g. "@network:default").
 // This normalizes them to "type:name" for internal use. Dependencies and
-// removals keep the full "type:name" format; step reference fields (network,
-// key, image, etc.) are further reduced to bare names by stripBareName.
+// removals keep the full "type:name" format.
 func stripRefPrefix(v any) any {
 	switch val := v.(type) {
 	case string:
@@ -60,21 +61,11 @@ func stripRefPrefix(v any) any {
 // This is called on each entry in resolveSpecV1 so factories never see the
 // "@" sigil — they work with bare "type:name" references throughout.
 func stripSpecRefs(spec model.ResourceMap) {
-	for k, v := range spec {
-		spec[k] = stripRefPrefix(v)
+	for _, k := range []string{"depends_on", "removes"} {
+		if v, ok := spec[k]; ok {
+			spec[k] = stripRefPrefix(v)
+		}
 	}
-}
-
-// stripBareName reduces a "type:name" string to just the bare name.
-// For values without a colon, returns as-is. This is used by step factories
-// to normalize "@type:name" references (stripped of "@" by stripSpecRefs)
-// to the bare step name expected by downstream resolvers.
-func stripBareName(s string) string {
-	_, after, found := strings.Cut(s, ":")
-	if found && after != "" {
-		return after
-	}
-	return s
 }
 
 // ResolveSpec reads a YAML spec file, validates it, and converts each
@@ -116,8 +107,13 @@ func ResolveSpec(ctx context.Context, specPath string, op api.API) (*EnvSpec, []
 	}
 
 	var spec EnvSpec
-	if err := yaml.Unmarshal(data, &spec); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(&spec); err != nil {
 		return nil, nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("env spec validation: invalid YAML: %v", err))
+	}
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, nil, errs.New(errs.CodeValidationFailed, "env spec must contain exactly one YAML document")
 	}
 
 	if spec.Version == "" {
@@ -143,6 +139,9 @@ func ResolveSpec(ctx context.Context, specPath string, op api.API) (*EnvSpec, []
 
 func resolveSpecV1(spec EnvSpec, op api.API) ([]workflow.Step, error) {
 	var steps []workflow.Step
+	if err := validateSpecStructure(spec); err != nil {
+		return nil, err
+	}
 
 	for resourceKey, factory := range Registry {
 		entries := spec.Steps[resourceKey]
@@ -166,5 +165,11 @@ func resolveSpecV1(spec EnvSpec, op api.API) ([]workflow.Step, error) {
 		}
 	}
 
+	if _, err := workflow.BuildDAG(steps); err != nil {
+		return nil, err
+	}
+	if err := validateSpecReferences(spec, steps); err != nil {
+		return nil, err
+	}
 	return steps, nil
 }

@@ -15,9 +15,29 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
+const (
+	testSpawnerVMID      = "0123456789abcdef0123456789abcdef"
+	testSpawnerNetworkID = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+)
+
+// spawnerWithCanonicalIdentity supplies the owner-bound IDs required before config generation.
+func spawnerWithCanonicalIdentity(t *testing.T, config *model.FirecrackerConfig) *vm.FirecrackerSpawner {
+	t.Helper()
+	if config.VMDir == "" {
+		config.VMDir = filepath.Join(t.TempDir(), testSpawnerVMID)
+	}
+	if config.NetworkPlacement == "" {
+		config.NetworkPlacement = model.VMNetworkPlacementManaged
+	}
+	if config.NetworkPlacement == model.VMNetworkPlacementManaged && config.NetworkID == "" {
+		config.NetworkID = testSpawnerNetworkID
+	}
+	return vm.NewFirecrackerSpawner(config)
+}
+
 // --- NewFirecrackerSpawner ---
 // Rationale: Ensures the spawner correctly copies config paths to its
-// exported fields. A bug here would misroute log/metrics/socket paths.
+// exported fields. A bug here would misroute log/metrics paths.
 
 func TestNewFirecrackerSpawner(t *testing.T) {
 	config := &model.FirecrackerConfig{
@@ -26,11 +46,9 @@ func TestNewFirecrackerSpawner(t *testing.T) {
 		MetricsPath:      "/tmp/mvm/fc.metrics",
 		SerialOutputPath: "/tmp/mvm/fc-serial.log",
 		PIDPath:          "/tmp/mvm/fc.pid",
-		APISocketPath:    "/tmp/mvm/fc.socket",
 	}
 
 	s := vm.NewFirecrackerSpawner(config)
-	assert.Equal(t, "/tmp/mvm/fc.socket", s.APISocketPath)
 	assert.Nil(t, s.PID)
 	assert.Nil(t, s.ProcessStartTime)
 }
@@ -64,11 +82,18 @@ func TestFirecrackerSpawner_Generate_errors(t *testing.T) {
 			},
 			wantErr: "NoCloud URL must be set",
 		},
+		"nested_virt_arm_unsupported": {
+			config: &model.FirecrackerConfig{
+				NestedVirt:          true,
+				ReleaseArchitecture: "aarch64",
+			},
+			wantErr: "admitted architecture-specific CPU profile",
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := vm.NewFirecrackerSpawner(tc.config)
+			s := spawnerWithCanonicalIdentity(t, tc.config)
 			_, err := s.Generate()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
@@ -119,67 +144,57 @@ func TestFirecrackerSpawner_Generate_bootArgs(t *testing.T) {
 		},
 		"nested_virt_intel": {
 			config: &model.FirecrackerConfig{
-				PCIEnabled:     false,
-				NestedVirt:     true,
-				CPUVendor:      ptr.Ptr("Intel"),
-				ImageFSUUID:    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				ImageFSType:    "ext4",
-				GuestIP:        "10.0.0.2",
-				NetworkGateway: "10.0.0.1",
-				NetworkNetmask: "255.255.255.0",
+				ReleaseArchitecture: "x86_64",
+				PCIEnabled:          false,
+				NestedVirt:          true,
+				CPUVendor:           ptr.Ptr("Intel"),
+				ImageFSUUID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+				ImageFSType:         "ext4",
+				GuestIP:             "10.0.0.2",
+				NetworkGateway:      "10.0.0.1",
+				NetworkNetmask:      "255.255.255.0",
 			},
 			want: "ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off kvm-intel.nested=1 root=UUID=a1b2c3d4-e5f6-7890-abcd-ef1234567890 rootfstype=ext4 systemd.mask=systemd-networkd-wait-online.service",
 		},
 		"nested_virt_amd": {
 			config: &model.FirecrackerConfig{
-				PCIEnabled:     false,
-				NestedVirt:     true,
-				CPUVendor:      ptr.Ptr("AMD"),
-				ImageFSUUID:    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				ImageFSType:    "ext4",
-				GuestIP:        "10.0.0.2",
-				NetworkGateway: "10.0.0.1",
-				NetworkNetmask: "255.255.255.0",
+				ReleaseArchitecture: "x86_64",
+				PCIEnabled:          false,
+				NestedVirt:          true,
+				CPUVendor:           ptr.Ptr("AMD"),
+				ImageFSUUID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+				ImageFSType:         "ext4",
+				GuestIP:             "10.0.0.2",
+				NetworkGateway:      "10.0.0.1",
+				NetworkNetmask:      "255.255.255.0",
 			},
 			want: "ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off kvm-amd.nested=1 root=UUID=a1b2c3d4-e5f6-7890-abcd-ef1234567890 rootfstype=ext4 systemd.mask=systemd-networkd-wait-online.service",
 		},
 		"nested_virt_hygon": {
 			config: &model.FirecrackerConfig{
-				PCIEnabled:     false,
-				NestedVirt:     true,
-				CPUVendor:      ptr.Ptr("Hygon"),
-				ImageFSUUID:    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				ImageFSType:    "ext4",
-				GuestIP:        "10.0.0.2",
-				NetworkGateway: "10.0.0.1",
-				NetworkNetmask: "255.255.255.0",
+				ReleaseArchitecture: "x86_64",
+				PCIEnabled:          false,
+				NestedVirt:          true,
+				CPUVendor:           ptr.Ptr("Hygon"),
+				ImageFSUUID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+				ImageFSType:         "ext4",
+				GuestIP:             "10.0.0.2",
+				NetworkGateway:      "10.0.0.1",
+				NetworkNetmask:      "255.255.255.0",
 			},
 			want: "ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off kvm-amd.nested=1 root=UUID=a1b2c3d4-e5f6-7890-abcd-ef1234567890 rootfstype=ext4 systemd.mask=systemd-networkd-wait-online.service",
 		},
-		"nested_virt_arm_no_boot_arg": {
-			config: &model.FirecrackerConfig{
-				PCIEnabled:      false,
-				NestedVirt:      true,
-				CPUVendor:       ptr.Ptr("arm"),
-				CPUArchitecture: ptr.Ptr("aarch64"),
-				ImageFSUUID:     "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				ImageFSType:     "ext4",
-				GuestIP:         "10.0.0.2",
-				NetworkGateway:  "10.0.0.1",
-				NetworkNetmask:  "255.255.255.0",
-			},
-			want: "ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=UUID=a1b2c3d4-e5f6-7890-abcd-ef1234567890 rootfstype=ext4 systemd.mask=systemd-networkd-wait-online.service",
-		},
 		"nested_virt_forces_pci_on": {
 			config: &model.FirecrackerConfig{
-				PCIEnabled:     false,
-				NestedVirt:     true,
-				CPUVendor:      ptr.Ptr("Intel"),
-				ImageFSUUID:    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				ImageFSType:    "ext4",
-				GuestIP:        "10.0.0.2",
-				NetworkGateway: "10.0.0.1",
-				NetworkNetmask: "255.255.255.0",
+				ReleaseArchitecture: "x86_64",
+				PCIEnabled:          false,
+				NestedVirt:          true,
+				CPUVendor:           ptr.Ptr("Intel"),
+				ImageFSUUID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+				ImageFSType:         "ext4",
+				GuestIP:             "10.0.0.2",
+				NetworkGateway:      "10.0.0.1",
+				NetworkNetmask:      "255.255.255.0",
 			},
 			want: "ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off kvm-intel.nested=1 root=UUID=a1b2c3d4-e5f6-7890-abcd-ef1234567890 rootfstype=ext4 systemd.mask=systemd-networkd-wait-online.service",
 		},
@@ -213,7 +228,7 @@ func TestFirecrackerSpawner_Generate_bootArgs(t *testing.T) {
 				NetworkNetmask: "255.255.255.0",
 				CloudInitMode:  ptr.Ptr(model.CloudInitModeINJECT),
 			},
-			want: "pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+			want: "pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
 		},
 		"cloud_init_iso": {
 			config: &model.FirecrackerConfig{
@@ -282,7 +297,7 @@ func TestFirecrackerSpawner_Generate_bootArgs(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := vm.NewFirecrackerSpawner(tc.config)
+			s := spawnerWithCanonicalIdentity(t, tc.config)
 			got, err := s.Generate()
 			require.NoError(t, err)
 			assert.Equal(t,
@@ -436,7 +451,7 @@ func TestFirecrackerSpawner_Generate_drivesConfig(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := vm.NewFirecrackerSpawner(tc.config)
+			s := spawnerWithCanonicalIdentity(t, tc.config)
 			got, err := s.Generate()
 			require.NoError(t, err)
 			if diff := cmp.Diff(tc.want, got.Drives); diff != "" {
@@ -451,33 +466,137 @@ func TestFirecrackerSpawner_Generate_drivesConfig(t *testing.T) {
 // A misconfigured interface prevents the VM from communicating.
 
 func TestFirecrackerSpawner_Generate_networkConfig(t *testing.T) {
+	config := &model.FirecrackerConfig{
+		GuestMAC: "02:00:00:00:00:01",
+		TapName:  "tap-test",
+	}
+	spawner := spawnerWithCanonicalIdentity(t, config)
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	require.Len(t, got.NetworkInterfaces, 1)
+	interfaceConfig := got.NetworkInterfaces[0]
+	assert.Equal(t, "eth0", interfaceConfig.IfaceID)
+	assert.Equal(t, config.GuestMAC, interfaceConfig.GuestMAC)
+	assert.Regexp(t, `^mvt[0-9a-f]{12}$`, interfaceConfig.HostDevName)
+	assert.NotEqual(t, "tap-test", interfaceConfig.HostDevName)
+}
+
+// A networkless VM has no guest IP data plane but retains its vsock device.
+func TestFirecrackerSpawnerGenerateNetworklessPlacement(t *testing.T) {
+	vmDir := filepath.Join(t.TempDir(), testSpawnerVMID)
+	cid := model.MinVsockGuestCID
+	spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+		VMDir:            vmDir,
+		NetworkPlacement: model.VMNetworkPlacementNetworkless,
+		BootArgs:         "quiet",
+		VsockGuestCID:    &cid,
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	if diff := cmp.Diff([]model.NetworkInterfaceConfig{}, got.NetworkInterfaces); diff != "" {
+		t.Errorf("networkless interfaces mismatch (-want +got):\n%s", diff)
+	}
+	assert.Equal(t, "quiet pci=off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service",
+		got.BootSource.BootArgs)
+	wantVsock := &model.VsockConfig{GuestCID: cid, UDSPath: filepath.Join(vmDir, "vsock.sock")}
+	if diff := cmp.Diff(wantVsock, got.Vsock); diff != "" {
+		t.Errorf("networkless vsock mismatch (-want +got):\n%s", diff)
+	}
+	data, err := json.Marshal(got)
+	require.NoError(t, err)
+	var serialized map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &serialized))
+	assert.JSONEq(t, `[]`, string(serialized["network-interfaces"]))
+}
+
+func TestFirecrackerSpawnerGenerateNetworklessISOCloudInit(t *testing.T) {
+	spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+		VMDir:            filepath.Join(t.TempDir(), testSpawnerVMID),
+		NetworkPlacement: model.VMNetworkPlacementNetworkless,
+		CloudInitMode:    ptr.Ptr(model.CloudInitModeISO),
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	assert.Equal(t, "pci=off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=nocloud",
+		got.BootSource.BootArgs)
+	if diff := cmp.Diff([]model.NetworkInterfaceConfig{}, got.NetworkInterfaces); diff != "" {
+		t.Errorf("networkless ISO interfaces mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestFirecrackerSpawnerGenerateNetworklessInjectedCloudInit(t *testing.T) {
+	spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+		VMDir:            filepath.Join(t.TempDir(), testSpawnerVMID),
+		NetworkPlacement: model.VMNetworkPlacementNetworkless,
+		CloudInitMode:    ptr.Ptr(model.CloudInitModeINJECT),
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		"pci=off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service ds=nocloud;s=file:///var/lib/cloud/seed/nocloud/",
+		got.BootSource.BootArgs,
+	)
+	assert.Empty(t, got.NetworkInterfaces)
+}
+
+func TestFirecrackerSpawnerRejectsMixedNetworklessPlacement(t *testing.T) {
 	tests := map[string]struct {
-		config *model.FirecrackerConfig
-		want   []model.NetworkInterfaceConfig
+		placement model.VMNetworkPlacement
+		networkID string
+		guestIP   string
+		guestMAC  string
+		tapName   string
+		gateway   string
+		netmask   string
+		cloudMode *model.CloudInitMode
+		bootArgs  string
+		wantErr   string
 	}{
-		"basic_single_interface": {
-			config: &model.FirecrackerConfig{
-				GuestMAC: "02:00:00:00:00:01",
-				TapName:  "tap-test",
-			},
-			want: []model.NetworkInterfaceConfig{
-				{
-					IfaceID:     "eth0",
-					GuestMAC:    "02:00:00:00:00:01",
-					HostDevName: "tap-test",
-				},
-			},
-		},
+		"missing_placement": {wantErr: "VM network placement is invalid"},
+		"unknown_placement": {placement: "unknown", wantErr: "VM network placement is invalid"},
+		"network_id": {placement: model.VMNetworkPlacementNetworkless, networkID: testSpawnerNetworkID,
+			wantErr: "cannot include a managed network endpoint"},
+		"guest_ip": {placement: model.VMNetworkPlacementNetworkless, guestIP: "10.0.0.2",
+			wantErr: "cannot include a managed network endpoint"},
+		"guest_mac": {placement: model.VMNetworkPlacementNetworkless, guestMAC: "02:00:00:00:00:01",
+			wantErr: "cannot include a managed network endpoint"},
+		"tap_name": {placement: model.VMNetworkPlacementNetworkless, tapName: "tap-test",
+			wantErr: "cannot include a managed network endpoint"},
+		"gateway": {placement: model.VMNetworkPlacementNetworkless, gateway: "10.0.0.1",
+			wantErr: "cannot include a managed network endpoint"},
+		"netmask": {placement: model.VMNetworkPlacementNetworkless, netmask: "255.255.255.0",
+			wantErr: "cannot include a managed network endpoint"},
+		"nocloud_net": {placement: model.VMNetworkPlacementNetworkless, cloudMode: ptr.Ptr(model.CloudInitModeNET),
+			wantErr: "cannot use NoCloud NET"},
+		"kernel_ip": {placement: model.VMNetworkPlacementNetworkless, bootArgs: "ip=10.0.0.2 quiet",
+			wantErr: "cannot include kernel ip boot arguments"},
+		"network_datasource": {placement: model.VMNetworkPlacementNetworkless,
+			bootArgs: "ds=nocloud;seedfrom=http://10.0.0.1:8000/",
+			wantErr:  "cannot include caller-supplied cloud-init datasource"},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := vm.NewFirecrackerSpawner(tc.config)
-			got, err := s.Generate()
-			require.NoError(t, err)
-			if diff := cmp.Diff(tc.want, got.NetworkInterfaces); diff != "" {
-				t.Errorf("NetworkInterfaces mismatch (-want +got):\n%s", diff)
-			}
+			spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+				VMDir:            filepath.Join(t.TempDir(), testSpawnerVMID),
+				NetworkPlacement: tc.placement,
+				NetworkID:        tc.networkID,
+				GuestIP:          tc.guestIP,
+				GuestMAC:         tc.guestMAC,
+				TapName:          tc.tapName,
+				NetworkGateway:   tc.gateway,
+				NetworkNetmask:   tc.netmask,
+				CloudInitMode:    tc.cloudMode,
+				BootArgs:         tc.bootArgs,
+			})
+			_, err := spawner.Generate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+			return
 		})
 	}
 }
@@ -505,13 +624,14 @@ func TestFirecrackerSpawner_Generate_cpuConfig(t *testing.T) {
 		},
 		"nested_virt_creates_empty_kvm_capabilities": {
 			config: &model.FirecrackerConfig{
-				NestedVirt:     true,
-				CPUVendor:      ptr.Ptr("Intel"),
-				ImageFSUUID:    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-				ImageFSType:    "ext4",
-				GuestIP:        "10.0.0.2",
-				NetworkGateway: "10.0.0.1",
-				NetworkNetmask: "255.255.255.0",
+				ReleaseArchitecture: "x86_64",
+				NestedVirt:          true,
+				CPUVendor:           ptr.Ptr("Intel"),
+				ImageFSUUID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+				ImageFSType:         "ext4",
+				GuestIP:             "10.0.0.2",
+				NetworkGateway:      "10.0.0.1",
+				NetworkNetmask:      "255.255.255.0",
 			},
 			want: &model.CpuConfig{
 				KvmCapabilities: []string{},
@@ -537,7 +657,7 @@ func TestFirecrackerSpawner_Generate_cpuConfig(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := vm.NewFirecrackerSpawner(tc.config)
+			s := spawnerWithCanonicalIdentity(t, tc.config)
 			got, err := s.Generate()
 			require.NoError(t, err)
 			if diff := cmp.Diff(tc.want, got.CPUConfig); diff != "" {
@@ -600,7 +720,7 @@ func TestFirecrackerSpawner_Generate_loggerMetrics(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := vm.NewFirecrackerSpawner(tc.config)
+			s := spawnerWithCanonicalIdentity(t, tc.config)
 			got, err := s.Generate()
 			require.NoError(t, err)
 
@@ -639,7 +759,7 @@ func TestFirecrackerSpawner_Generate_fullConfig(t *testing.T) {
 		MetricsPath:    "/tmp/mvm/fc.metrics",
 	}
 
-	s := vm.NewFirecrackerSpawner(config)
+	s := spawnerWithCanonicalIdentity(t, config)
 	got, err := s.Generate()
 	require.NoError(t, err)
 
@@ -652,6 +772,23 @@ func TestFirecrackerSpawner_Generate_fullConfig(t *testing.T) {
 	assert.Equal(t, config.MemSizeMiB, got.MachineConfig.MemSizeMiB)
 	assert.False(t, got.MachineConfig.SMT)
 	assert.False(t, got.MachineConfig.TrackDirtyPages)
+}
+
+// Rationale: normal launch input may select only a CID; the core VM package
+// owns the host endpoint beneath the already selected managed VM directory.
+func TestFirecrackerSpawnerGenerateDerivesFixedVsockEndpoint(t *testing.T) {
+	vmDir := filepath.Join(t.TempDir(), testSpawnerVMID)
+	cid := model.MinVsockGuestCID
+	spawner := spawnerWithCanonicalIdentity(t, &model.FirecrackerConfig{
+		VMDir: vmDir, VsockGuestCID: &cid,
+		GuestIP: "10.0.0.2", NetworkGateway: "10.0.0.1", NetworkNetmask: "255.255.255.0",
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	require.NotNil(t, got.Vsock)
+	assert.Equal(t, cid, got.Vsock.GuestCID)
+	assert.Equal(t, filepath.Join(vmDir, "vsock.sock"), got.Vsock.UDSPath)
 }
 
 // --- RemoveDrive ---

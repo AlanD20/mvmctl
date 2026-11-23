@@ -1,5 +1,9 @@
 # Service Binaries & Loop-Mount Provisioner
 
+> **Historical implementation record (pre-0.3.0):** The `mvm run provision`, sudo-spawn, and raw wire-operation paths
+> below are removed from current production code. For the current architecture, see the Provisioner Backend section
+> in [CONTEXT.md](../../CONTEXT.md) and [ADR-0016](../adr/0016-root-owned-single-binary-privileged-dispatch.md).
+
 ## Problem
 
 Root filesystem provisioning for Firecracker VMs (SSH key injection, hostname setup, DNS config, cloud-init disable, filesystem resize) previously required a guestfs session, which launched a QEMU process taking ~2600ms. This guestfs launch overhead was the primary bottleneck in `vm create`. The loop-mount provisioner replaces guestfs with a direct kernel loop device approach that completes in ~200ms, saving ~2400ms per VM creation.

@@ -2,14 +2,14 @@
 
 Architecture
 ============
-Tests use a module-scoped VM (``module_vm``) created with ubuntu:24.04 and
-the ``--user runner`` flag. The ``exec_vm`` fixture verifies the vsock agent
-is reachable before any test runs.
+Tests use a module-scoped, networkless VM created with the ``--user runner``
+flag. The ``exec_vm`` fixture verifies the vsock agent is reachable before any
+test runs and checks teardown afterward.
 
 Edge cases covered per file
 ---------------------------
-Happy path: basic command execution, interactive shell, --port, --timeout, --user.
-Invalid args: nonexistent VM, empty command (valid — starts interactive shell).
+Happy path: basic command execution, interactive shell, --port, --user.
+Invalid args: nonexistent VM and invalid vsock port.
 JSON output: exec does not have --json; output is raw command output.
 Confirmation prompts: N/A for exec.
 Non-existent resources: nonexistent VM → error.
@@ -18,13 +18,24 @@ Duplicates: N/A for exec.
 
 from __future__ import annotations
 
+import json
+import os
+import select
 import subprocess
 import time
 import uuid
+from pathlib import Path
+from typing import Any, Generator
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm
+from tests.system.conftest import (
+    SYSTEM_MVM_BINARY,
+    _guest_run,
+    _json_success_data,
+    _parse_vm_list,
+    _run_mvm,
+)
 
 pytestmark = [
     pytest.mark.system,
@@ -91,19 +102,141 @@ def _exec_cmd(
 # ============================================================================
 
 
-@pytest.fixture(scope="module")
-def exec_vm(runner_vm, module_vm) -> dict:
-    """Module-scoped VM with vsock exec verified available.
+_EXEC_INVENTORIES = {
+    "image": ("image", "ls"), "kernel": ("kernel", "ls"), "bin": ("bin", "ls"),
+    "vm": ("vm", "ls"), "network": ("network", "ls"), "volume": ("volume", "ls"),
+    "key": ("key", "ls"), "snapshot": ("snapshot", "ls"), "env": ("env", "ls"),
+    "exec_policy": ("policy", "exec", "ls"), "traffic_policy": ("policy", "traffic", "ls"),
+    "config": ("config", "ls"),
+}
 
-    Wraps ``module_vm`` and polls until ``mvm exec {vm} -- exit`` succeeds.
-    Tests in this file can assume the vsock agent is reachable.
-    """
-    vm_name = module_vm["name"]
-    if not _wait_for_exec(runner_vm, vm_name):
-        pytest.fail(
+
+def _exec_inventory(runner_vm: str, domain: str):
+    expected = dict if domain in ("traffic_policy", "config") else list
+    data = _json_success_data(_run_mvm(runner_vm, *_EXEC_INVENTORIES[domain], "--json").stdout, expected)
+    return sorted(data, key=lambda item: json.dumps(item, sort_keys=True)) if isinstance(data, list) else data
+
+
+def _require_exec_assets(baseline: dict) -> dict[str, str]:
+    """Require the preseeded launch selection without pulling or changing defaults."""
+    images = [item for item in baseline["image"] if item["is_present"]
+              and (item["type"], item["version"]) == ("alpine", "3.23")]
+    assert len(images) == 1, images
+    kernels = [item for item in baseline["kernel"] if item["is_default"]]
+    assert len(kernels) == 1 and kernels[0]["is_present"], kernels
+    selected = {"image_id": images[0]["id"], "kernel_id": kernels[0]["id"]}
+    for kind in ("firecracker", "jailer"):
+        binaries = [item for item in baseline["bin"] if item["type"] == kind and item["is_default"]]
+        assert len(binaries) == 1 and binaries[0]["is_present"] and binaries[0]["version"] == "1.17.0", binaries
+        selected["binary_id" if kind == "firecracker" else "jailer_binary_id"] = binaries[0]["id"]
+    return selected
+
+
+def _exec_pin_task(vm: dict) -> tuple[int, int, int]:
+    """Pin the CLI-observed task and prove its exact start identity and liveness."""
+    pid, ticks = int(vm["pid"]), int(vm["process_start_time"])
+    assert pid > 0 and ticks > 0, vm
+    fd = os.pidfd_open(pid)
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text().rpartition(") ")[2].split()
+        assert len(fields) >= 20 and int(fields[19]) == ticks and fields[0] not in ("Z", "X"), (vm, fields)
+        poller = select.poll()
+        poller.register(fd, select.POLLIN)
+        assert poller.poll(0) == [], vm
+        return fd, pid, ticks
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+@pytest.fixture(scope="module")
+def exec_vm(runner_vm: str) -> Generator[dict[str, Any], None, None]:
+    """One preseeded networkless guest, retained creation identity, and checked cleanup."""
+    baseline = {domain: _exec_inventory(runner_vm, domain) for domain in _EXEC_INVENTORIES}
+    selected_assets = _require_exec_assets(baseline)
+    vm_name = f"sys-exec-{uuid.uuid4().hex[:8]}"
+    current_vms = _exec_inventory(runner_vm, "vm")
+    assert current_vms == baseline["vm"], "VM inventory changed before fixture creation"
+    before_ids = {item["id"] for item in baseline["vm"]}
+    assert all(item["name"] != vm_name for item in baseline["vm"]), vm_name
+    args = ["vm", "create", vm_name, "--image", selected_assets["image_id"], "--no-network", "--cloud-init-mode", "off",
+            "--skip-deblob", "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+            "--user", "runner", "--json"]
+    intent = {"name": vm_name, "arguments": args[:], "before_ids": before_ids}
+    receipt = None
+    task = None
+    try:
+        creation = _run_mvm(runner_vm, *args, check=False, timeout=180)
+        envelope = json.loads(creation.stdout)
+        assert envelope["schema_version"] == 1 and envelope["status"] in ("success", "partial", "error"), envelope
+        if envelope["data"] is not None:
+            assert isinstance(envelope["data"], list) and len(envelope["data"]) <= 1, envelope
+            for vm in envelope["data"]:
+                assert vm["name"] == intent["name"] and vm["id"] not in intent["before_ids"] and vm["created_at"], vm
+                receipt = {key: vm[key] for key in ("id", "name", "created_at", "pid", "process_start_time")}
+        assert creation.returncode == 0, (creation.stdout, creation.stderr)
+        created = _json_success_data(
+            creation.stdout,
+            list,
+        )
+        assert len(created) == 1 and created[0]["name"] == vm_name
+        vm = created[0]
+        assert receipt is not None and vm["id"] == receipt["id"], (vm, receipt)
+        assert {key: vm[key] for key in selected_assets} == selected_assets, (vm, selected_assets)
+        assert (vm["vcpu_count"], vm["mem_size_mib"], vm["disk_size_mib"]) == (1, 256, 512), vm
+        assert vm["network_placement"] == "networkless" and vm["network_id"] == "", vm
+        assert vm["ipv4"] == vm["mac"] == vm["tap_device"] == "" and vm["pci_enabled"] is False, vm
+        task = _exec_pin_task(vm)
+        assert _wait_for_exec(runner_vm, vm_name), (
             f"mvm exec is not available for VM '{vm_name}' within timeout"
         )
-    return module_vm
+        print(f"ordinary exec intent={intent['arguments']} receipt={json.dumps(receipt, sort_keys=True)} "
+              f"assets={json.dumps(selected_assets, sort_keys=True)}", flush=True)
+        yield {"name": vm_name}
+    finally:
+        errors = []
+        try:
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            matches = [item for item in listed if item["name"] == vm_name
+                       or (receipt is not None and item["id"] == receipt["id"])]
+            assert len(matches) <= 1, matches
+            for vm in matches:
+                assert receipt is not None, f"unreceipted VM at creation name: {matches}"
+                assert {key: vm[key] for key in ("id", "name", "created_at")} == {
+                    key: receipt[key] for key in ("id", "name", "created_at")
+                }, (vm, receipt)
+                if vm["status"] == "running":
+                    assert (vm["pid"], vm["process_start_time"]) == (receipt["pid"], receipt["process_start_time"]), (vm, receipt)
+                    if task is None:
+                        task = _exec_pin_task(vm)
+                    poller = select.poll()
+                    poller.register(task[0], select.POLLIN)
+                    assert poller.poll(0) == [], (vm, task)
+                removed = _run_mvm(
+                    runner_vm, "vm", "rm", receipt["id"], "--force", check=False, timeout=120,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+                if task is not None:
+                    poller = select.poll()
+                    poller.register(task[0], select.POLLIN)
+                    events = poller.poll(10_000)
+                    assert len(events) == 1 and events[0][0] == task[0], (receipt, events)
+                    assert events[0][1] & (select.POLLIN | select.POLLHUP), events
+                    assert not events[0][1] & (select.POLLERR | select.POLLNVAL), events
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(item["name"] != vm_name and (receipt is None or item["id"] != receipt["id"])
+                       for item in listed), listed
+        except Exception as exc:
+            errors.append(f"owned VM cleanup: {exc}")
+        finally:
+            if task is not None:
+                os.close(task[0])
+        for domain, original in baseline.items():
+            try:
+                assert _exec_inventory(runner_vm, domain) == original, f"{domain} inventory/config changed"
+            except Exception as exc:
+                errors.append(f"{domain} baseline: {exc}")
+        assert not errors, "; ".join(errors)
 
 
 # ========================================================================
@@ -140,15 +273,16 @@ class TestExecBasic:
         """Run a command via interactive shell (no ``--`` separator).
 
         ``mvm exec <id>`` (without ``--`` or a trailing command) starts an
-        interactive vsock session that reads commands from stdin.  We pipe
-        a command via ``printf`` to exercise this code path.
+        interactive vsock session. The CLI needs a terminal for raw mode, so
+        ``script`` supplies a PTY while stdin feeds a command and exit.
 
         Tier: L2 (requires running VM with vsock agent).
         """
         vm_name = exec_vm["name"]
         result = _guest_run(
             runner_vm,
-            f"printf 'echo hello\\n' | mvm exec {vm_name}",
+            "printf 'echo hello\\nexit\\n' | "
+            f"script -q -e -c '{SYSTEM_MVM_BINARY} exec {vm_name}' /dev/null",
             check=False,
         )
         assert result.returncode == 0, (
@@ -162,12 +296,12 @@ class TestExecBasic:
 
 
 # ========================================================================
-# TestExecFlags — --port, --timeout, --user
+# TestExecFlags — --port, --user
 # ========================================================================
 
 
 class TestExecFlags:
-    """Exec flag handling: --port, --timeout, --user."""
+    """Exec flag handling: --port and --user."""
 
     pytestmark = [
         pytest.mark.system,
@@ -197,32 +331,10 @@ class TestExecFlags:
             f"Expected 'hello' in stdout, got: {result.stdout!r}"
         )
 
-    def test_exec_with_timeout(self, runner_vm, exec_vm):
-        """Execute a command with ``--timeout`` set explicitly.
-
-        ``--timeout`` controls how long the vsock client waits for the
-        agent's initial response.  A reasonable positive value (10 s)
-        should work identically to the default for a healthy VM.
-
-        Tier: L1 (timeout is a client-side parameter, but a running VM
-        is needed to confirm the flag is accepted without error).
-        """
-        vm_name = exec_vm["name"]
-        result = _exec_cmd(
-            runner_vm, vm_name, "echo hello", timeout_s=10,
-        )
-        assert result.returncode == 0, (
-            f"exec --timeout 30 failed: rc={result.returncode} "
-            f"stderr={result.stderr!r}"
-        )
-        assert "hello" in result.stdout, (
-            f"Expected 'hello' in stdout, got: {result.stdout!r}"
-        )
-
     def test_exec_with_user(self, runner_vm, exec_vm):
         """Execute a command as a non-root user via ``--user``.
 
-        The ``module_vm`` was created with ``--user runner``, so a
+        The ``exec_vm`` was created with ``--user runner``, so a
         ``runner`` user should exist inside the guest.  Running
         ``whoami`` via ``--user runner`` should return ``runner``.
 
@@ -279,45 +391,25 @@ class TestExecErrorCases:
         )
 
     def test_exec_invalid_port(self, runner_vm, exec_vm):
-        """``mvm exec <vm> --port -1 -- echo hello`` must fail."""
+        """Invalid 32-bit vsock ports must reject before guest effects."""
         vm_name = exec_vm["name"]
-        result = _run_mvm(
-            runner_vm,
-            "exec",
-            vm_name,
-            "--port",
-            "-1",
-            "--",
-            "echo hello",
-            check=False,
-        )
-        assert result.returncode != 0, (
-            "Expected exec with invalid port to fail, "
-            f"but got rc=0: stdout={result.stdout!r}"
-        )
-
-    def test_exec_empty_command(self, runner_vm, exec_vm):
-        """``mvm exec <vm>`` without ``--`` starts interactive shell.
-
-        With no command and no ``--`` separator, exec enters interactive
-        mode.  We send an empty input (just newline) and verify the
-        session starts (non-zero exit indicates failure).
-
-        Tier: L2 (interactive session requires a running VM).
-        """
-        vm_name = exec_vm["name"]
-        # Use _guest_run with a pipe: send a newline to the interactive
-        # session, which should cause the remote shell to produce a
-        # prompt or at least not crash.
-        result = _guest_run(
-            runner_vm,
-            f"printf '\\n' | mvm exec {vm_name}",
-            check=False,
-        )
-        # Interactive mode with just a newline should succeed (non-error).
-        # Some output is expected (the remote shell's prompt or empty echo).
-        assert result.returncode == 0, (
-            f"Interactive exec with empty input failed: "
-            f"rc={result.returncode} stdout={result.stdout!r} "
-            f"stderr={result.stderr!r}"
-        )
+        for port in ("-1", str(2**32)):
+            sentinel = f"/tmp/mvm-invalid-port-{uuid.uuid4().hex[:8]}"
+            result = _run_mvm(
+                runner_vm,
+                "exec",
+                vm_name,
+                "--port",
+                port,
+                "--",
+                "touch",
+                sentinel,
+                check=False,
+            )
+            assert result.returncode != 0, (
+                f"Expected exec with invalid port {port} to fail, "
+                f"but got rc=0: stdout={result.stdout!r}"
+            )
+            assert "port" in (result.stdout + result.stderr).lower()
+            absent = _exec_cmd(runner_vm, vm_name, f"test ! -e {sentinel}")
+            assert absent.returncode == 0, f"invalid port {port} reached the guest"

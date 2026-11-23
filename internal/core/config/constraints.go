@@ -70,33 +70,6 @@ func (r *ConstraintRegistry) GetTransforms(category, key string) []TransformFunc
 
 // Built-in constraints
 
-// validateNoCloudPortRange ensures nocloud_port_range_end > nocloud_port_range_start.
-func validateNoCloudPortRange(key string, resolve ResolveFn) error {
-	startRaw, err := resolve("nocloud_port_range_start")
-	if err != nil {
-		return err
-	}
-	endRaw, err := resolve("nocloud_port_range_end")
-	if err != nil {
-		return err
-	}
-
-	start, err := validators.ToInt(startRaw)
-	if err != nil {
-		return err
-	}
-	end, err := validators.ToInt(endRaw)
-	if err != nil {
-		return err
-	}
-
-	if end <= start {
-		return errs.New(errs.CodeConfigError,
-			fmt.Sprintf("nocloud_port_range_end (%d) must be greater than nocloud_port_range_start (%d)", end, start))
-	}
-	return nil
-}
-
 // validateMACPrefix ensures guest_mac_prefix is a valid 2-byte hex MAC prefix.
 var macPrefixRE = regexp.MustCompile(`^[0-9a-fA-F]{2}:[0-9a-fA-F]{2}$`)
 
@@ -110,6 +83,32 @@ func validateMACPrefix(key string, resolve ResolveFn) error {
 	if !macPrefixRE.MatchString(prefix) {
 		return errs.New(errs.CodeConfigError,
 			fmt.Sprintf("Invalid MAC prefix '%s'. Must be two hex bytes separated by a colon (e.g. '02:FC').", prefix))
+	}
+	return nil
+}
+
+func validateCgroupDefaults(key string, resolve ResolveFn) error {
+	valueRaw, err := resolve(key)
+	if err != nil {
+		return err
+	}
+	value, err := validators.ToInt(valueRaw)
+	if err != nil {
+		return err
+	}
+	switch key {
+	case "cgroup_vmm_headroom_mib", "cgroup_swap_max_bytes":
+		if value < 0 {
+			return errs.New(errs.CodeConfigError, fmt.Sprintf("%s must be non-negative", key))
+		}
+	case "cgroup_cpu_weight":
+		if value < 1 || value > 10000 {
+			return errs.New(errs.CodeConfigError, "cgroup_cpu_weight must be between 1 and 10000")
+		}
+	case "cgroup_pids_max":
+		if value < 1 {
+			return errs.New(errs.CodeConfigError, "cgroup_pids_max must be positive")
+		}
 	}
 	return nil
 }
@@ -134,15 +133,16 @@ func NormalizeCacheType(key string, value any) (any, error) {
 // RegisterBuiltinConstraints registers all built-in constraints on the given registry.
 // Called during app initialization.
 func RegisterBuiltinConstraints(r *ConstraintRegistry) {
-	r.Register("defaults.cloudinit",
-		[]string{"nocloud_port_range_start", "nocloud_port_range_end"},
-		validateNoCloudPortRange,
-	)
-
 	r.Register("defaults.vm",
 		[]string{"guest_mac_prefix"},
 		validateMACPrefix,
 	)
+	r.Register("defaults.vm", []string{
+		"cgroup_vmm_headroom_mib",
+		"cgroup_cpu_weight",
+		"cgroup_pids_max",
+		"cgroup_swap_max_bytes",
+	}, validateCgroupDefaults)
 
 	r.RegisterTransform("defaults.volume", []string{"cache_type"}, NormalizeCacheType)
 }

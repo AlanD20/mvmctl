@@ -15,59 +15,21 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// RELATIONS defines the cross-domain relations for kernel enrichment.
-var RELATIONS = map[string]model.RelationSpec{
-	"vm": {
-		FKField:      "id",
-		Resolver:     "vm",
-		Method:       "find_by_kernel_id",
-		RelationName: "vms",
-		IsReverse:    true,
-		BatchMethod:  "by_kernel_id_batch",
-	},
-}
-
 type ResolveResult struct {
 	Items    []*model.KernelItem
 	Errors   []string
 	ExitCode int
 }
 
-// EnrichFunc is a function that enriches kernels in-place with relations.
-// Set by the API layer during wiring to avoid circular imports.
-type EnrichFunc func(ctx context.Context, kernels []*model.KernelItem, include []string, relations map[string]model.RelationSpec)
-
 type Resolver struct {
-	repo       Repository
-	include    []string
-	enrichFunc EnrichFunc
+	repo Repository
 }
 
 // NewResolver creates a new Resolver.
-func NewResolver(repo Repository, include []string) *Resolver {
+func NewResolver(repo Repository) *Resolver {
 	return &Resolver{
-		repo:    repo,
-		include: include,
+		repo: repo,
 	}
-}
-
-// SetEnrichFunc sets the enrichment function called after each resolution.
-// Must be set for cross-domain relation enrichment (e.g., populating VMs).
-func (r *Resolver) SetEnrichFunc(fn EnrichFunc) {
-	r.enrichFunc = fn
-}
-
-// SetInclude sets the relation names to include during resolution.
-func (r *Resolver) SetInclude(include []string) {
-	r.include = include
-}
-
-// Enrich enriches kernels with relations if include is set.
-func (r *Resolver) Enrich(ctx context.Context, kernels []*model.KernelItem) []*model.KernelItem {
-	if r.include != nil && len(kernels) > 0 && r.enrichFunc != nil {
-		r.enrichFunc(ctx, kernels, r.include, RELATIONS)
-	}
-	return kernels
 }
 
 // ByID resolves a kernel by ID prefix.
@@ -90,8 +52,7 @@ func (r *Resolver) ByID(ctx context.Context, kernelID string, includeDeleted ...
 			errs.WithEntity(fmt.Sprintf("Kernel ID is ambiguous: '%s'", kernelID)),
 		)
 	}
-	enriched := r.Enrich(ctx, matches)
-	return enriched[0], nil
+	return matches[0], nil
 }
 
 // ByVersionType resolves by version and type (both required).
@@ -107,8 +68,7 @@ func (r *Resolver) ByVersionType(ctx context.Context, version, kernelType string
 			errs.WithEntity(fmt.Sprintf("Kernel not found: version='%s', type='%s'", version, kernelType)),
 		)
 	}
-	enriched := r.Enrich(ctx, []*model.KernelItem{k})
-	return enriched[0], nil
+	return k, nil
 }
 
 // ByNameVersion resolves a kernel by name and version.
@@ -131,8 +91,7 @@ func (r *Resolver) ByType(ctx context.Context, typeStr string) (*model.KernelIte
 			errs.WithEntity(fmt.Sprintf("Kernel not found: type='%s'", typeStr)),
 		)
 	}
-	enriched := r.Enrich(ctx, []*model.KernelItem{k})
-	return enriched[0], nil
+	return k, nil
 }
 
 // GetDefault resolves the default kernel, or nil if not set.
@@ -144,8 +103,7 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.KernelItem, error) {
 	if k == nil {
 		return nil, nil
 	}
-	enriched := r.Enrich(ctx, []*model.KernelItem{k})
-	return enriched[0], nil
+	return k, nil
 }
 
 // Resolve resolves a kernel by ID prefix, "[type:]version" selector, or file path.
@@ -181,7 +139,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string, includeDeleted ...
 	// Try by type
 	k, err = r.repo.GetByType(ctx, value)
 	if err == nil && k != nil {
-		return r.Enrich(ctx, []*model.KernelItem{k})[0], nil
+		return k, nil
 	}
 
 	// Fallback: treat value as a filesystem path to a vmlinux binary.
@@ -217,8 +175,6 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string, includ
 			items = append(items, item)
 		}
 	}
-
-	items = r.Enrich(ctx, items)
 
 	exitCode := 0
 	if len(errors) > 0 && len(items) == 0 {

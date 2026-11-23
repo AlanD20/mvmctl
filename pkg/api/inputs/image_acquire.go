@@ -2,6 +2,7 @@ package inputs
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -110,6 +111,7 @@ type ImageImportInput struct {
 	Partition         int      `json:"partition,omitempty"           yaml:"partition,omitempty"`
 	SkipOptimization  bool     `json:"skip_optimization"             yaml:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"  yaml:"disabled_detectors,omitempty"`
+	ResumeID          string   `json:"resume_id,omitempty"           yaml:"resume_id,omitempty"`
 }
 
 // Validate checks that the image import input is valid.
@@ -122,6 +124,15 @@ func (i *ImageImportInput) Validate() error {
 	}
 	if i.Partition < 0 {
 		return fmt.Errorf("partition cannot be negative")
+	}
+	if i.ResumeID != "" {
+		if _, err := hex.DecodeString(i.ResumeID); err != nil || len(i.ResumeID) != 64 ||
+			i.ResumeID != strings.ToLower(i.ResumeID) {
+			return errs.New(errs.CodeValidationFailed, "resume requires a full lowercase image ID")
+		}
+		if i.Force {
+			return errs.New(errs.CodeValidationFailed, "resume cannot replace a registered image with force")
+		}
 	}
 	return nil
 }
@@ -138,6 +149,18 @@ func (i *ImageImportInput) Resolve(
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
+	if i.ResumeID != "" {
+		registered, err := repo.Get(ctx, i.ResumeID)
+		if err != nil {
+			return nil, err
+		}
+		if registered != nil {
+			return nil, errs.New(
+				errs.CodeValidationFailed,
+				"image is already registered; inspect it instead of resuming",
+			)
+		}
+	}
 
 	// --- 1. Try VM resolution first — VM name supersedes local path ---
 	source := i.Source
@@ -146,16 +169,22 @@ func (i *ImageImportInput) Resolve(
 		vmResolver := vm.NewResolver(vmRepo)
 		vmItem, vmErr := vmResolver.Resolve(ctx, source)
 		if vmErr == nil && vmItem != nil {
-			source = vmItem.RootfsPath
+			if i.ResumeID != "" {
+				return nil, errs.New(
+					errs.CodeValidationFailed,
+					"resume is supported only for retained local image imports",
+				)
+			}
+			source = vmItem.ID // Provenance only; root export selects the protected bytes.
 			resolvedVM = vmItem
 			i.Format = "raw"          // force raw for VM rootfs
 			i.SkipOptimization = true // skip deblob for VM imports
-			slog.Debug("Importing from VM", "vm", vmItem.Name, "rootfs", source)
+			slog.Debug("Importing from VM", "vm", vmItem.Name)
 		}
 	}
 
 	// --- 2. If NOT a VM, validate source file exists ---
-	if source == i.Source { // still original = not resolved as VM
+	if resolvedVM == nil {
 		if _, err := os.Stat(source); os.IsNotExist(err) {
 			return nil, errs.New(errs.CodeImageImportFailed,
 				fmt.Sprintf("source not found: %s", source))
@@ -174,6 +203,9 @@ func (i *ImageImportInput) Resolve(
 	if format == "" {
 		format, _ = cfg.GetString(ctx, "defaults.image", "import_format")
 	}
+	if format == "auto" {
+		format = ""
+	}
 	// Extension-based auto-detect
 	if format == "" {
 		fname := strings.ToLower(filepath.Base(source))
@@ -187,7 +219,10 @@ func (i *ImageImportInput) Resolve(
 		}
 	}
 	// Magic-byte fallback detection
-	detected := disk.DetectImageFormat(source)
+	detected := ""
+	if resolvedVM == nil {
+		detected = disk.DetectImageFormat(source)
+	}
 	if detected != "" && format == "" {
 		format = detected
 	}

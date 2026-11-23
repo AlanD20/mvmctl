@@ -1,27 +1,24 @@
 package inputs
 
 import (
-	"mvmctl/internal/infra"
-	"mvmctl/pkg/errs"
 	"strings"
+
+	"mvmctl/pkg/errs"
 )
 
 // BinaryPullInput holds options for pulling a Firecracker binary.
 type BinaryPullInput struct {
-	Version          string  `json:"version"           yaml:"version"`
-	Type             string  `json:"type"              yaml:"type"`
-	GitRef           *string `json:"git_ref,omitempty" yaml:"git_ref,omitempty"`
-	SetDefault       bool    `json:"set_default"       yaml:"default"`
-	DownloadOverride bool    `json:"force"             yaml:"force"`
+	Version          string `json:"version"           yaml:"version"`
+	Type             string `json:"type"              yaml:"type"`
+	SetDefault       bool   `json:"set_default"       yaml:"default"`
+	DownloadOverride bool   `json:"force"             yaml:"force"`
 }
 
 // ResolvedBinaryPullInput specifies resolved binary pull input.
 type ResolvedBinaryPullInput struct {
 	Version          string
 	Type             string
-	GitRef           *string
 	SetDefault       bool
-	BinDir           string
 	DownloadOverride bool
 }
 
@@ -45,7 +42,6 @@ func (i *BinaryPullInput) Resolve() (*ResolvedBinaryPullInput, error) {
 	version := strings.TrimPrefix(i.Version, "v")
 	// Version validation is handled by the service's ResolveVersion method,
 	// which accepts latest, partial (e.g. "1.15"), and exact (e.g. "1.15.1") specs.
-	// When git_ref is provided, version may be empty.
 	// Default type to "firecracker"
 	typ := i.Type
 	if typ == "" {
@@ -61,9 +57,7 @@ func (i *BinaryPullInput) Resolve() (*ResolvedBinaryPullInput, error) {
 	return &ResolvedBinaryPullInput{
 		Version:          version,
 		Type:             typ,
-		GitRef:           i.GitRef,
 		SetDefault:       i.SetDefault,
-		BinDir:           infra.GetBinDir(),
 		DownloadOverride: i.DownloadOverride,
 	}, nil
 }

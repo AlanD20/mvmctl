@@ -35,20 +35,65 @@ type SnapshotItem struct {
 // SnapshotCreateConfig collects all external parameters for creating a snapshot.
 // Passed from the API layer to the controller.
 type SnapshotCreateConfig struct {
-	MemFile           string
-	StateFile         string
-	PauseOnly         bool
-	PhantomRootfsPath string // empty = skip PATCH drive during snapshot
-	RootfsPath        string // original path to restore after snapshot
+	CacheRoot  string
+	SnapshotID string
+	PauseOnly  bool
 }
 
 // SnapshotRestoreConfig collects all external parameters for restoring a snapshot.
 // Passed from the API layer to the controller.
 type SnapshotRestoreConfig struct {
-	MemFile          string
-	StateFile        string
-	Resume           bool
-	NetworkOverrides map[string]string // iface_id → host_dev_name (TAP)
-	VsockUDSPath     string            // vsock_override UDS path (empty if none)
-	RootfsPath       string            // rootfs path for post-Load PATCH
+	CacheRoot  string
+	SnapshotID string
+	Resume     bool
+}
+
+// SnapshotCaptureResult is a display projection of the root-authenticated capture.
+// It is not a capability to reopen artifacts or choose restore configuration.
+type SnapshotCaptureResult struct {
+	SnapshotID          string             `json:"snapshot_id"`
+	SourceVMID          string             `json:"source_vm_id"`
+	Mode                string             `json:"mode"`
+	Paused              bool               `json:"paused"`
+	VCPUCount           int                `json:"vcpu_count"`
+	MemSizeMiB          int                `json:"mem_size_mib"`
+	RootfsBytes         uint64             `json:"rootfs_bytes"`
+	NetworkPlacement    VMNetworkPlacement `json:"network_placement"`
+	NetworkID           string             `json:"network_id"`
+	GuestIPv4           string             `json:"guest_ipv4"`
+	GuestMAC            string             `json:"guest_mac"`
+	ReleaseVersion      string             `json:"release_version"`
+	ReleaseArchitecture string             `json:"release_architecture"`
+	FirecrackerSHA256   string             `json:"firecracker_sha256"`
+	JailerSHA256        string             `json:"jailer_sha256"`
+	KernelID            string             `json:"kernel_id"`
+	PCIEnabled          bool               `json:"pci_enabled"`
+	NestedVirt          bool               `json:"nested_virt"`
+	CloudInit           bool               `json:"cloud_init"`
+	BootArgs            string             `json:"boot_args"`
+	CgroupLimits        VMCgroupLimits     `json:"cgroup_limits"`
+	CPUConfig           *CpuConfig         `json:"cpu_config,omitempty"`
+	VsockCID            *uint32            `json:"vsock_cid,omitempty"`
+	Logging             bool               `json:"logging"`
+	Metrics             bool               `json:"metrics"`
+	LogLevel            string             `json:"log_level"`
+}
+
+// SnapshotRestoredVolume projects a new independent disk while retaining its guest drive identity.
+type SnapshotRestoredVolume struct {
+	ID           string `json:"id"`
+	GuestDriveID string `json:"guest_drive_id"`
+	Bytes        uint64 `json:"bytes"`
+	ReadOnly     bool   `json:"read_only"`
+	CacheType    string `json:"cache_type"`
+}
+
+// SnapshotRestoreResult projects a completed root-owned restore transaction.
+type SnapshotRestoreResult struct {
+	VMID             string                   `json:"vm_id"`
+	PID              int                      `json:"pid"`
+	StartTimeTicks   uint64                   `json:"start_time_ticks"`
+	LaunchGeneration uint64                   `json:"launch_generation"`
+	Configuration    SnapshotCaptureResult    `json:"configuration"`
+	Volumes          []SnapshotRestoredVolume `json:"volumes"`
 }

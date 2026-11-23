@@ -1,16 +1,24 @@
 """System tests for ``mvm cp`` — copy files between host and microVMs.
 
 All temp files reside inside the test VM (via _run_mvm sh -c) — no host temp files.
-Verification uses SSH inside the nested VM for uploads, and _run_mvm sh -c for downloads.
+Verification uses vsock exec inside the nested VM for uploads, and _run_mvm sh -c for downloads.
 """
 
 from __future__ import annotations
 
+import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 
-from tests.system.conftest import _guest_run, _run_mvm, _unique_subnet, ensure_vm_deps
+from tests.system.conftest import (
+    _guest_run,
+    _parse_vm_list,
+    _run_mvm,
+    _unique_subnet,
+    ensure_vm_deps,
+)
 
 pytestmark = [
     pytest.mark.system,
@@ -25,13 +33,52 @@ def _exec_cmd(
     return _run_mvm(
         runner_vm,
         "exec", vm_name,
-        "--user", "runner",
+        "--user", "root",
         "--timeout", "30",
         "--",
         command,
         check=False,
         timeout=45,
     )
+
+
+class TestCpNetworklessRoundTrip:
+    @pytest.mark.requires_kvm
+    @pytest.mark.slow
+    def test_host_to_vm_and_back_without_network(self, runner_vm: str) -> None:
+        """The installed vsock copy path transfers the same bytes in both directions."""
+        ensure_vm_deps(runner_vm)
+        vm_name = f"sys-cp-offline-{uuid.uuid4().hex[:8]}"
+        guest_path = f"/tmp/cp-roundtrip-{uuid.uuid4().hex[:8]}.txt"
+        repo_tmp = Path(__file__).resolve().parents[3] / ".tmp"
+        repo_tmp.mkdir(exist_ok=True)
+        try:
+            with tempfile.TemporaryDirectory(prefix="cp-networkless-", dir=repo_tmp) as scratch:
+                source = Path(scratch) / "source.txt"
+                restored = Path(scratch) / "restored.txt"
+                payload = f"mvmctl-cp-roundtrip-{uuid.uuid4().hex}\n"
+                source.write_text(payload)
+                _run_mvm(
+                    runner_vm, "vm", "create", vm_name, "--image", "alpine:3.23",
+                    "--no-network", "--cloud-init-mode", "off", "--skip-deblob",
+                    "--no-pci", "-s", "512M", "--mem", "256M", "--vcpu", "1",
+                    timeout=180,
+                )
+                _run_mvm(runner_vm, "cp", str(source), f"{vm_name}:{guest_path}")
+                guest = _run_mvm(runner_vm, "exec", vm_name, "--", "cat", guest_path)
+                assert guest.stdout == payload
+
+                _run_mvm(runner_vm, "cp", f"{vm_name}:{guest_path}", str(restored))
+                assert restored.read_text() == payload
+        finally:
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            if any(vm["name"] == vm_name for vm in listed):
+                removed = _run_mvm(
+                    runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120,
+                )
+                assert removed.returncode == 0, (removed.stdout, removed.stderr)
+            listed = _parse_vm_list(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            assert all(vm["name"] != vm_name for vm in listed)
 
 
 # ============================================================================
@@ -80,7 +127,7 @@ class TestCpHostToVm:
                 f"cp failed: stdout={result.stdout} stderr={result.stderr}"
             )
 
-            # L3: Verify file exists inside the nested VM via SSH
+            # L2: Verify file exists inside the nested VM via vsock exec.
             dest_file = f"{remote_dir}{remote_file.split('/')[-1]}"
             ssh_result = _exec_cmd(
                 runner_vm,
@@ -118,7 +165,7 @@ class TestCpHostToVm:
         runner_vm: str,
         created_vm: dict,
     ) -> None:
-        """Copy a directory from host to VM — verify on guest via SSH."""
+        """Copy a directory from host to VM — verify via guest vsock exec."""
         vm_info = created_vm
 
         # Create a temp directory with content inside the test VM
@@ -166,8 +213,7 @@ class TestCpHostToVm:
             _exec_cmd(
                 runner_vm,
                 vm_info["name"],
-                f"rm -f '{remote_parent}/file1.txt '{remote_parent}/nested/file2.txt'; "
-                f"rmdir '{remote_parent}/nested' 2>/dev/null; true",
+                f"rm -rf '{remote_parent}/{dir_name}'",
             )
             _guest_run(runner_vm,
                 f"rm -rf '{remote_parent}/{dir_name}'",
@@ -291,7 +337,7 @@ class TestCpVmToHost:
         )
 
         remote_dir = "/tmp/"
-        download_dest_parent = "/tmp/roundtrip_dest"
+        download_dest_parent = f"/tmp/roundtrip_dest_{uuid.uuid4().hex[:8]}"
 
         try:
             # Step 1: Copy host → VM (tar preserves original filename)
@@ -490,8 +536,8 @@ class TestCpEdgeCases:
         vm_info = created_vm
 
         remote_dir = "/tmp/"
-        remote_file = "/tmp/file_for_force.txt"
-        src_file = "/tmp/file_for_force.txt"
+        remote_file = f"/tmp/file_for_force_{uuid.uuid4().hex[:8]}.txt"
+        src_file = remote_file
 
         try:
             _guest_run(runner_vm,
@@ -729,35 +775,39 @@ class TestCpMultiSource:
         runner_vm: str,
     ) -> None:
         """Multi-source to a local destination should fail."""
-        file1 = "/tmp/src_a.txt"
-        file2 = "/tmp/src_b.txt"
-        local_dest = "/tmp/local_dest"
+        suffix = uuid.uuid4().hex[:8]
+        file1 = f"/tmp/src_a_{suffix}.txt"
+        file2 = f"/tmp/src_b_{suffix}.txt"
+        local_dest = f"/tmp/local_dest_{suffix}"
 
         _guest_run(runner_vm,
             f"echo 'aaa' > '{file1}' && echo 'bbb' > '{file2}'",
         )
 
-        result = _run_mvm(
-            runner_vm,
-            "cp",
-            file1, file2,
-            local_dest,
-            check=False,
-            timeout=45,
-        )
-        assert result.returncode != 0, (
-            f"Expected non-zero exit for multi-source with local dest, "
-            f"got rc={result.returncode}: stdout={result.stdout} "
-            f"stderr={result.stderr}"
-        )
-        error_msg = (result.stderr + " " + result.stdout).lower()
-        assert any(
-            keyword in error_msg
-            for keyword in [
-                "requires", "destination", "vm", "remote",
-                "multi", "multiple",
-            ]
-        ), f"Expected error mentioning multi-source requires VM dest, got: {result.stderr}"
+        try:
+            result = _run_mvm(
+                runner_vm,
+                "cp",
+                file1, file2,
+                local_dest,
+                check=False,
+                timeout=45,
+            )
+            assert result.returncode != 0, (
+                f"Expected non-zero exit for multi-source with local dest, "
+                f"got rc={result.returncode}: stdout={result.stdout} "
+                f"stderr={result.stderr}"
+            )
+            error_msg = (result.stderr + " " + result.stdout).lower()
+            assert any(
+                keyword in error_msg
+                for keyword in [
+                    "requires", "destination", "vm", "remote",
+                    "multi", "multiple",
+                ]
+            ), f"Expected error mentioning multi-source requires VM dest, got: {result.stderr}"
+        finally:
+            _guest_run(runner_vm, f"rm -f '{file1}' '{file2}'", check=False)
 
 
 # ============================================================================
@@ -812,6 +862,10 @@ class TestCpVmToVm:
                 net_name,
                 "--ssh-key",
                 key_name,
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
             )
             _run_mvm(
                 runner_vm,
@@ -824,6 +878,10 @@ class TestCpVmToVm:
                 net_name,
                 "--ssh-key",
                 key_name,
+                "--mem",
+                "256M",
+                "--vcpu",
+                "1",
             )
 
             test_content = f"vm-to-vm test {uuid.uuid4().hex}"

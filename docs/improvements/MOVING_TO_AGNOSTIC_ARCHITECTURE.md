@@ -1,8 +1,11 @@
 # Moving to a VMM-Agnostic Architecture
 
-> **STATUS: Design Proposal — not implemented.** All 15 tracked components remain unstarted. Codebase is fully Firecracker-coupled. No `VMMDriver`, `VMMFactory`, or `vmm_type` field exists anywhere in the Go codebase. `FirecrackerGithubReleasesAPIURL` and `FirecrackerGithubDownloadURL` still hardcoded in `internal/infra/constants.go`. Controller directly imports `internal/lib/firecracker` (was `internal/core/vm/firecracker_client.go`, moved to `internal/lib/firecracker/client.go`). No `--vmm` CLI flags exist.
+> **STATUS: Design Proposal — not implemented.** All 15 tracked components remain unstarted. Codebase is fully Firecracker-coupled. No `VMMDriver`, `VMMFactory`, or `vmm_type` field exists anywhere in the Go codebase. `FirecrackerGithubReleasesAPIURL` and `FirecrackerGithubDownloadURL` still hardcoded in `internal/infra/constants.go`. The Jailer service owns Firecracker runtime requests. No `--vmm` CLI flags exist.
 >
-> **Last verified:** 2026-06-27
+> **Historical baseline:** 2026-06-27. The coupling map and capability comparisons below are proposal-era research,
+> not a current implementation or upstream support matrix. Current Firecracker-only launch uses typed root-owned
+> Jailer authority; the console relays a pinned PTY rather than reading a serial-output file. See
+> [CONTEXT.md](../../CONTEXT.md) and [Console Relay](../implementations/CONSOLE_RELAY.md) for current boundaries.
 
 ## Implementation Status Summary
 
@@ -52,12 +55,12 @@ This coupling creates several problems:
 
 | File / Location | Coupling | What Needs to Change |
 |---|---|---|
-| `internal/lib/firecracker/client.go` (moved from `internal/core/vm/firecracker_client.go`) | `FirecrackerClient` — HTTP-over-Unix-socket client for runtime control | Extract into `FirecrackerDriver`. |
+| `internal/service/jailer/api_broker_server.go` | Closed Firecracker runtime operations | Evaluate where to place a driver boundary while preserving typed admission. |
 | `internal/core/vm/firecracker.go` | `FirecrackerSpawner` — writes JSON config, launches with `--config-file` | Extract into `FirecrackerDriver`. |
 | `internal/lib/model/firecracker.go` | `FirecrackerConfig` struct — Firecracker-specific fields | Becomes internal to `FirecrackerDriver`. |
-| `internal/core/vm/controller.go` | Direct `FirecrackerClient` imports for pause/resume/start/snapshot | Controller accepts `VMMDriver` instead. |
+| `internal/core/vm/controller.go` | VM lifecycle coordination | Keep lifecycle coordination separate from the VMM driver. |
 | `pkg/api/vm.go` | `buildFirecrackerConfig()`, `FirecrackerSpawner` usage | Replace with `buildVMMConfig()`, factory-based driver creation. |
-| `internal/infra/constants.go` | `OverridableDefaults["defaults.firecracker"]` (8 filenames + log_level) | Move to `FirecrackerDriver`. |
+| `internal/infra/constants.go` | Fixed Firecracker artifact vocabulary plus `defaults.firecracker.log_level` | Move driver-specific fixed names and settings to `FirecrackerDriver`. |
 | `internal/infra/constants.go` | `FirecrackerGithubReleasesAPIURL`, `FirecrackerGithubDownloadURL` | Move into `FirecrackerDriver`. |
 | `internal/cli/vm.go` | No `--vmm` or `--vmm-bin` flags | Add `--vmm` + `--vmm-bin` flags. |
 
@@ -319,7 +322,7 @@ func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VM, repo vm.Reposit
 | **PCIe** | ❌ (limited PCI) | ✅ | ✅ |
 | **Boot speed** | Very fast | Fast | Slower (BIOS/EFI) |
 | **Memory overhead** | ~5MB per VM | ~15-30MB per VM | ~30-100MB per VM |
-| **Process isolation** | Single process (+optional jailer) | Process-per-device (minijail) | Single process (+optional) |
+| **Process isolation** | Canonical Firecracker Jailer | Process-per-device (minijail) | Single process (+optional) |
 | **Architectures** | x86_64, aarch64 | x86_64, aarch64, riscv64 | x86_64, aarch64, riscv64, arm, mips, ppc, s390x |
 
 ---
@@ -385,7 +388,7 @@ func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VM, repo vm.Reposit
 | Core/VM | `internal/lib/provisioner/` | VMM-aware block device naming | ❌ |
 | API | `pkg/api/vm.go`, `pkg/api/inputs/*` | VMM-agnostic config building, factory usage | ❌ |
 | CLI | `internal/cli/vm.go` | `--vmm`/`--vmm-bin` flags, generic help text | ❌ |
-| Constants | `internal/infra/constants.go` | Remove Firecracker-specific URLs/filenames | ❌ |
+| Constants | `internal/infra/constants.go` | Move Firecracker-specific URLs and fixed artifact names behind the driver | ❌ |
 | DB | `db/migrations/NNN_vmm_agnostic.sql` | New migration | ❌ |
 | Services | `internal/service/console/` | Console source abstraction | ❌ |
 

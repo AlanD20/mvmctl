@@ -1,0 +1,58 @@
+#!/bin/bash
+set -euo pipefail
+
+control() {
+  timeout 3 mvm-agent control floating-ip "$@"
+}
+
+observe() {
+  local state
+  state=$(control inspect "$RESOURCE_ID") || return 1
+  generation=$(jq -er --arg id "$RESOURCE_ID" \
+    'select(.resource_id == $id) | .generation | select(type == "number" and . > 0 and floor == .)' <<<"$state") || return 1
+  ownership=$(jq -er '.ownership | select(. == "self" or . == "other" or . == "unassociated")' <<<"$state") || return 1
+  lifetime=$(jq -er '.lifetime | select(. == "" or . == "finite" or . == "persistent")' <<<"$state")
+}
+
+release_self() {
+  # A failed/unknown mutation is never replayed with the old generation.
+  observe || return 1
+  if [[ $ownership == self && $lifetime == finite ]]; then
+    control release --generation "$generation" "$RESOURCE_ID" >/dev/null || return 1
+  fi
+}
+
+healthy() {
+  [[ -s /etc/kubernetes/admin.conf ]] &&
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf --server="https://$PRIMARY_IP:6443" \
+      --request-timeout=2s get --raw=/readyz >/dev/null 2>&1
+}
+
+step() {
+  if healthy; then
+    observe || return 0
+    # Persistent assignments belong to the operator, including assignments to us.
+    case "$ownership:$lifetime" in
+      unassociated:) control associate --generation "$generation" "$RESOURCE_ID" >/dev/null || true ;;
+      self:finite) control renew --generation "$generation" "$RESOURCE_ID" >/dev/null || true ;;
+      *) : ;; # Never preempt another owner or manage persistent ownership.
+    esac
+  else
+    release_self || true
+  fi
+}
+
+main() {
+  source /etc/k8s-api-lease.conf
+  [[ $RESOURCE_ID =~ ^[0-9a-f]{32}$ ]] || exit 1
+  [[ $PRIMARY_IP =~ ^10\.10\.0\.(10|11|12)$ ]] || exit 1
+  if [[ ${1:-} == release ]]; then
+    release_self
+    return
+  fi
+  trap 'exit 0' TERM INT
+  trap 'release_self || true' EXIT
+  while true; do step; sleep 1; done
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

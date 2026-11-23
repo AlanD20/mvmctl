@@ -4,11 +4,14 @@
 >
 > Implementation location: `internal/lib/provisioner/guestfs/`
 >
-> **Note:** The guestfs provisioning path is the **fallback backend** in mvmctl. The primary provisioning backend is the loop-mount subprocess (`mvm provision` via `LoopMountBackend`). Guestfs is used only when the loop-mount binary is unavailable or `guestfs_enabled` is set to `true` in config (`internal/infra/constants.go`).
+> **Note:** GuestFS is an explicitly selected alternative backend. Loop-mount is the default; setting
+> `settings.guestfs_enabled` to `true` selects GuestFS. `provisioner.NewBackend()` has no automatic fallback on
+> loop-mount failure. The former raw provision subprocess is historical; see [CONTEXT.md](../../CONTEXT.md)
+> for the current typed provisioning boundary.
 
 ## Overview
 
-This document describes the boot-time optimizations for the fallback libguestfs provisioning path in mvmctl. These optimizations reduce appliance startup time by configuring the backend directly, minimizing resource allocation, and disabling unnecessary services.
+This document describes the boot-time optimizations for the optional libguestfs provisioning path in mvmctl. These optimizations reduce appliance startup time by configuring the backend directly, minimizing resource allocation, and disabling unnecessary services.
 
 The Go implementation uses `guestfish` CLI as a subprocess (Go has no native guestfs bindings). Environment variables control most backend settings; the remaining handle-level settings are passed as stdin commands to `guestfish`.
 
@@ -91,9 +94,13 @@ allArgs = append(allArgs, "--no-sync")
 
 `BuildAppliance()` at `internal/lib/provisioner/guestfs/utils.go` builds the libguestfs fixed appliance during `mvm cache init`. It runs `libguestfs-make-fixed-appliance` if available on the system. If the tool is not installed, it silently skips the build (returns `nil`).
 
-Before building, it calls `CleanStaleState()` in `utils.go` to kill abandoned QEMU/guestfish processes, remove stale lock files, daemon sockets, and cached appliance directories that could cause the appliance build to hang.
+In 0.3.0, appliance building and miscellaneous pruning no longer clean up global libguestfs processes, locks,
+sockets, or temporary appliances. Same-user paths and command lines do not establish mvm ownership. Normal
+GuestFS operations remain available; `PruneAppliance()` removes only the selected cache's appliance directory.
+Interrupted GuestFS operations may leave global state that requires manual cleanup after independently proving
+ownership. `cache prune misc --json` retains `guestfs_state: false`; it does not report global orphan recovery.
 
-**Code reference:** `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `CleanStaleState()`, `PruneAppliance()`, `EnsureAppliance()`.
+**Code reference:** `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `PruneAppliance()`, `EnsureAppliance()`.
 
 ### 10. Retry Logic (3 attempts, backoff) ✅ IMPLEMENTED
 
@@ -154,7 +161,7 @@ The `RunDeferred()` function (`provisioner.go:52-135`) executes provisioning in 
 - `internal/lib/provisioner/guestfs/backend.go` — `GuestfsBackend` builder
 - `internal/lib/provisioner/guestfs/provisioner.go` — `RunDeferred()`, `buildScript()`
 - `internal/lib/provisioner/guestfs/scripts.go` — Shell script templates (hostname, DNS, SSH, cloud-init, deblob)
-- `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `CleanStaleState()`, `PruneAppliance()`
+- `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `PruneAppliance()`
 - `internal/lib/provisioner/guestfs/kernel_detector.go` — `KernelDetector`
 - `internal/lib/provisioner/backend.go` — Backend factory (guestfs vs loopmount selection)
 - `internal/infra/constants.go` — `guestfs_enabled` default

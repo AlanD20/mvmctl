@@ -1,0 +1,155 @@
+package firewall
+
+import (
+	"github.com/google/nftables/expr"
+)
+
+func (compiler *generationCompiler) compileINet(intent generationIntent) error {
+	forward := compiler.generation.inet.chains[0]
+	input := compiler.generation.inet.chains[1]
+	nat := compiler.generation.inet.chains[2]
+	networks := sortedCopy(intent.networks, func(network networkIntent) string { return network.id })
+
+	for _, network := range networks {
+		if network.masquerade {
+			compiler.addRule(&compiler.generation.inet, forward, "inet.forward.egress."+network.id,
+				joinExpressions(
+					matchInputInterface(network.hostBridge),
+					matchOutputInterface(network.uplinkInterface),
+					matchIPv4Family(),
+					matchIPv4Prefix(12, network.subnet),
+					acceptVerdict(),
+				))
+		}
+	}
+
+	for _, grant := range sortedCopy(intent.vmGrants, func(grant vmTrafficGrant) string { return grant.id }) {
+		source := compiler.endpoints[grant.sourceVMID]
+		destination := compiler.endpoints[grant.destinationVMID]
+		for _, sourceAddress := range compiler.endpointAddressVariants(source) {
+			for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
+				compiler.addDirectionalTrafficRules(
+					&compiler.generation.inet,
+					forward,
+					"inet.forward.allow.vm."+grant.id+addressPairRuleSuffix(sourceAddress, destinationAddress),
+					func(direction trafficDirection) []expr.Any {
+						return inetVMGrantExpressions(
+							compiler.networks[source.networkID], compiler.networks[destination.networkID],
+							sourceAddress.endpoint, destinationAddress.endpoint, grant.protocol, grant.ports, direction)
+					},
+				)
+			}
+		}
+	}
+
+	for _, grant := range sortedCopy(intent.networkGrants, func(grant networkTrafficGrant) string { return grant.id }) {
+		source := compiler.networks[grant.sourceNetworkID]
+		destination := compiler.endpoints[grant.destinationVMID]
+		for _, destinationAddress := range compiler.endpointAddressVariants(destination) {
+			compiler.addDirectionalTrafficRules(
+				&compiler.generation.inet,
+				forward,
+				"inet.forward.allow.network."+grant.id+destinationAddress.suffix,
+				func(direction trafficDirection) []expr.Any {
+					return inetNetworkGrantExpressions(source, compiler.networks[destination.networkID],
+						destinationAddress.endpoint, grant.protocol, grant.ports, direction)
+				},
+			)
+		}
+	}
+
+	compiler.compileINetFloatingIPGrants(intent)
+	if err := compiler.compileLabelTraffic(intent.labelTraffic, &compiler.generation.inet,
+		forward, "inet.forward.allow.labels.", matchIPv4Family()); err != nil {
+		return err
+	}
+
+	for _, network := range networks {
+		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.default-deny."+network.id,
+			joinExpressions(matchInputInterface(network.hostBridge), dropVerdict()))
+	}
+	// Only traffic arriving from outside managed bridges reaches the conntrack shortcut.
+	for _, network := range networks {
+		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.established."+network.id,
+			joinExpressions(matchOutputInterface(network.hostBridge), acceptEstablishedRelated()))
+	}
+	for _, network := range networks {
+		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.default-deny-inbound."+network.id,
+			joinExpressions(matchOutputInterface(network.hostBridge), dropVerdict()))
+		compiler.addRule(&compiler.generation.inet, input, "inet.input.established."+network.id,
+			joinExpressions(matchInputInterface(network.hostBridge), acceptEstablishedRelated()))
+	}
+
+	for _, service := range sortedCopy(intent.hostServices, func(service hostServiceIntent) string { return service.id }) {
+		network := compiler.networks[service.sourceNetworkID]
+		compiler.addRule(&compiler.generation.inet, input, "inet.input.allow."+service.id,
+			joinExpressions(
+				matchInputInterface(network.hostBridge),
+				matchIPv4Family(),
+				matchIPv4Prefix(12, network.subnet),
+				matchIPv4Address(16, network.hostIPv4),
+				matchProtocol(service.protocol),
+				matchDestinationPorts(service.ports),
+				acceptVerdict(),
+			))
+	}
+
+	compiler.compileHostTraffic(intent)
+
+	for _, network := range networks {
+		compiler.addRule(&compiler.generation.inet, input, "inet.input.default-deny."+network.id,
+			joinExpressions(matchInputInterface(network.hostBridge), dropVerdict()))
+		if network.masquerade {
+			compiler.addRule(&compiler.generation.inet, nat, "inet.nat.masquerade."+network.id,
+				joinExpressions(
+					matchInputInterface(network.hostBridge),
+					matchOutputInterface(network.uplinkInterface),
+					matchIPv4Family(),
+					matchIPv4Prefix(12, network.subnet),
+					[]expr.Any{&expr.Masq{}},
+				))
+		}
+	}
+	return nil
+}
+
+func inetVMGrantExpressions(
+	sourceNetwork networkIntent,
+	destinationNetwork networkIntent,
+	source endpointIntent,
+	destination endpointIntent,
+	protocolValue protocol,
+	ports portInterval,
+	direction trafficDirection,
+) []expr.Any {
+	sourceOffset, destinationOffset, sourceKey, destinationKey := direction.endpoints()
+	return joinExpressions(
+		matchInterface(sourceKey, sourceNetwork.hostBridge),
+		matchInterface(destinationKey, destinationNetwork.hostBridge),
+		matchIPv4Family(),
+		matchIPv4Address(sourceOffset, source.ipv4),
+		matchIPv4Address(destinationOffset, destination.ipv4),
+		matchOriginalTraffic(direction, protocolValue, ports),
+		acceptVerdict(),
+	)
+}
+
+func inetNetworkGrantExpressions(
+	source networkIntent,
+	destinationNetwork networkIntent,
+	destination endpointIntent,
+	protocolValue protocol,
+	ports portInterval,
+	direction trafficDirection,
+) []expr.Any {
+	sourceOffset, destinationOffset, sourceKey, destinationKey := direction.endpoints()
+	return joinExpressions(
+		matchInterface(sourceKey, source.hostBridge),
+		matchInterface(destinationKey, destinationNetwork.hostBridge),
+		matchIPv4Family(),
+		matchIPv4Prefix(sourceOffset, source.subnet),
+		matchIPv4Address(destinationOffset, destination.ipv4),
+		matchOriginalTraffic(direction, protocolValue, ports),
+		acceptVerdict(),
+	)
+}

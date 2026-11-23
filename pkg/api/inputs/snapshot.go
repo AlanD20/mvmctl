@@ -78,7 +78,7 @@ func (i *SnapshotRestoreInput) ResolveNetwork(
 	if i.Network == nil || *i.Network == "" {
 		return nil, nil
 	}
-	resolver := network.NewResolver(repo, nil)
+	resolver := network.NewResolver(repo)
 	return resolver.Resolve(ctx, *i.Network)
 }
 

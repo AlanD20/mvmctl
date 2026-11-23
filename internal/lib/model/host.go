@@ -82,18 +82,19 @@ type HostHardware struct {
 
 // HostLimits holds detected host kernel limits.
 type HostLimits struct {
-	PIDMax              int    `json:"pid_max"`
-	FDMax               int    `json:"fd_max"`
-	ConntrackMax        int    `json:"conntrack_max"`
-	TAPDevicesMax       int    `json:"tap_devices_max"`
-	IPLocalPortRange    [2]int `json:"ip_local_port_range"`
-	NestedVirtAvailable bool   `json:"nested_virt_available"`
-	EPTAvailable        bool   `json:"ept_available"`
-	HugepageCount2MB    int    `json:"hugepage_count_2mb"`
-	KSMDisabled         bool   `json:"ksm_disabled"`
-	CgroupVersion       int    `json:"cgroup_version"`
-	SwapTotalMiB        int    `json:"swap_total_mib"`
-	KernelMinimumMet    bool   `json:"kernel_minimum_met"`
+	PIDMax              int      `json:"pid_max"`
+	FDMax               int      `json:"fd_max"`
+	ConntrackMax        int      `json:"conntrack_max"`
+	TAPDevicesMax       int      `json:"tap_devices_max"`
+	IPLocalPortRange    [2]int   `json:"ip_local_port_range"`
+	NestedVirtAvailable bool     `json:"nested_virt_available"`
+	EPTAvailable        bool     `json:"ept_available"`
+	HugepageCount2MB    int      `json:"hugepage_count_2mb"`
+	KSMDisabled         bool     `json:"ksm_disabled"`
+	CgroupVersion       int      `json:"cgroup_version"`
+	CgroupControllers   []string `json:"cgroup_controllers" db:"-"`
+	SwapTotalMiB        int      `json:"swap_total_mib"`
+	KernelMinimumMet    bool     `json:"kernel_minimum_met"`
 }
 
 // --- HostResources ---
@@ -114,7 +115,7 @@ type HostResources struct {
 	HugepagesFree2MB      int             `json:"hugepages_free_2mb"`
 	SMTActive             bool            `json:"smt_active"`
 	NftablesAvailable     bool            `json:"nftables_available"`
-	IptablesAvailable     bool            `json:"iptables_available"`
+	NftablesProbeError    string          `json:"nftables_probe_error,omitempty"`
 	CloudLocaldsAvailable bool            `json:"cloud_localds_available"`
 	DevKVMStatus          string          `json:"dev_kvm_status"`
 	UserInKVMGroup        bool            `json:"user_in_kvm_group"`

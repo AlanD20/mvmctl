@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+export KUBECONFIG=/etc/kubernetes/admin.conf
+if kubectl -n kube-system get daemonset cilium >/dev/null 2>&1; then exit 0; fi
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+version=$(curl -fsSL https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+curl -fLO "https://github.com/cilium/cilium-cli/releases/download/$version/cilium-linux-amd64.tar.gz"
+curl -fLO "https://github.com/cilium/cilium-cli/releases/download/$version/cilium-linux-amd64.tar.gz.sha256sum"
+sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
+tar xzf cilium-linux-amd64.tar.gz -C /usr/local/bin
+cilium install --version 1.19.3 \
+  --set k8sServiceHost=10.10.0.100 --set k8sServicePort=6443 \
+  --set routingMode=tunnel --set tunnelProtocol=vxlan --set kubeProxyReplacement=true \
+  --set ipam.mode=kubernetes --set cluster.name=k8s --set cluster.id=1
+kubectl -n kube-system delete daemonset kube-proxy --ignore-not-found
+kubectl -n kube-system delete configmap kube-proxy --ignore-not-found

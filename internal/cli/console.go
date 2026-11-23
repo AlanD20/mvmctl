@@ -45,6 +45,9 @@ Use --kill to stop the console relay.`,
 			if kill {
 				return killConsoleRelay(consoleAPI, cmd.Context(), identifier)
 			}
+			if common.StructuredOutput() {
+				return common.UnsupportedOutput(cmd.CommandPath())
+			}
 			return attachToConsole(consoleAPI, cmd, identifier)
 		},
 	}
@@ -57,6 +60,7 @@ Use --kill to stop the console relay.`,
 
 func showConsoleState(consoleAPI api.ConsoleAPI, ctx context.Context, identifier string) error {
 	state, err := consoleAPI.ConsoleGetState(ctx, identifier)
+	common.RecordResult(state)
 	if err != nil {
 		return err
 	}

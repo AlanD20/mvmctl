@@ -12,6 +12,7 @@ import (
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
@@ -31,11 +32,16 @@ type ctxBinaryRepo struct {
 
 var _ binary.Repository = (*ctxBinaryRepo)(nil)
 
-func (r *ctxBinaryRepo) GetByTypeAndVersion(ctx context.Context, typ, version string) (*model.BinaryItem, error) {
+func (r *ctxBinaryRepo) GetByTypeAndVersion(
+	ctx context.Context,
+	typ string,
+	architecture string,
+	version string,
+) (*model.BinaryItem, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return r.BinaryRepo.GetByTypeAndVersion(ctx, typ, version)
+	return r.BinaryRepo.GetByTypeAndVersion(ctx, typ, architecture, version)
 }
 
 // ctxWriter wraps a StateWriter to propagate context cancellation.
@@ -58,7 +64,7 @@ type errorBinaryRepo struct {
 
 var _ binary.Repository = (*errorBinaryRepo)(nil)
 
-func (r *errorBinaryRepo) GetByTypeAndVersion(_ context.Context, _, _ string) (*model.BinaryItem, error) {
+func (r *errorBinaryRepo) GetByTypeAndVersion(_ context.Context, _, _, _ string) (*model.BinaryItem, error) {
 	return nil, r.getErr
 }
 
@@ -144,10 +150,11 @@ func TestBinaryStep_Apply(t *testing.T) {
 			setupOp: func(t *testing.T) *api.Operation {
 				repo := testutil.NewBinaryRepo()
 				require.NoError(t, repo.Upsert(context.Background(), &model.BinaryItem{
-					ID:        "bin-existing",
-					Type:      "firecracker",
-					Version:   "1.15.1",
-					IsPresent: true,
+					ID:           "bin-existing",
+					Type:         "firecracker",
+					Architecture: system.RuntimeArch(),
+					Version:      "1.15.1",
+					IsPresent:    true,
 				}))
 				return &api.Operation{Repos: api.Repos{Binary: repo}}
 			},
@@ -159,10 +166,11 @@ func TestBinaryStep_Apply(t *testing.T) {
 			setupOp: func(t *testing.T) *api.Operation {
 				repo := testutil.NewBinaryRepo()
 				require.NoError(t, repo.Upsert(context.Background(), &model.BinaryItem{
-					ID:        "bin-preserved",
-					Type:      "firecracker",
-					Version:   "1.15.1",
-					IsPresent: true,
+					ID:           "bin-preserved",
+					Type:         "firecracker",
+					Architecture: system.RuntimeArch(),
+					Version:      "1.15.1",
+					IsPresent:    true,
 				}))
 				return &api.Operation{Repos: api.Repos{Binary: repo}}
 			},
@@ -392,10 +400,11 @@ func TestBinaryStep_StateData(t *testing.T) {
 func TestBinaryStep_Apply_WriteFailure(t *testing.T) {
 	repo := testutil.NewBinaryRepo()
 	require.NoError(t, repo.Upsert(context.Background(), &model.BinaryItem{
-		ID:        "bin-1",
-		Type:      "firecracker",
-		Version:   "1.15.1",
-		IsPresent: true,
+		ID:           "bin-1",
+		Type:         "firecracker",
+		Architecture: system.RuntimeArch(),
+		Version:      "1.15.1",
+		IsPresent:    true,
 	}))
 	op := &api.Operation{Repos: api.Repos{Binary: repo}}
 	step := newBinaryStep(t, op)

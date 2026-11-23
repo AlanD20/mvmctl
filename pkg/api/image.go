@@ -15,7 +15,9 @@ import (
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
+	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -27,6 +29,11 @@ import (
 
 // ImageAPI defines the public interface for image operations.
 type ImageAPI interface {
+	ImagePullWithResult(
+		context.Context,
+		inputs.ImagePullInput,
+		event.OnProgressCallback,
+	) (*results.ImagePullResult, error)
 	ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
 	ImagePull(
 		ctx context.Context,
@@ -38,6 +45,11 @@ type ImageAPI interface {
 		input inputs.ImageImportInput,
 		onProgress event.OnProgressCallback,
 	) (*model.ImageItem, error)
+	ImageImportWithResult(
+		context.Context,
+		inputs.ImageImportInput,
+		event.OnProgressCallback,
+	) (*results.ImageImportResult, error)
 	ImageWarm(
 		ctx context.Context,
 		input inputs.ImageInput,
@@ -109,6 +121,19 @@ func (op *Operation) ImagePull(
 	input inputs.ImagePullInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
+	result, err := op.ImagePullWithResult(ctx, input, onProgress)
+	if result == nil {
+		return nil, err
+	}
+	return result.Image, err
+}
+
+// ImagePullWithResult distinguishes newly persisted images from cached reuse.
+func (op *Operation) ImagePullWithResult(
+	ctx context.Context,
+	input inputs.ImagePullInput,
+	onProgress event.OnProgressCallback,
+) (*results.ImagePullResult, error) {
 	// Resolve pull input (arch, output dir, validation)
 	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image)
 	if err != nil {
@@ -205,15 +230,20 @@ func (op *Operation) ImagePull(
 			if _, err := os.Stat(existing.Path); err == nil {
 				slog.Info("Image already exists", "path", existing.Path)
 				if input.SetDefault {
-					_ = op.Repos.Image.SetDefault(ctx, existing.ID)
+					if err := op.Repos.Image.SetDefault(ctx, existing.ID); err != nil {
+						return &results.ImagePullResult{Image: existing, Created: false},
+							errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
+					}
+					existing.IsDefault = true
 				}
-				return existing, nil
+				return &results.ImagePullResult{Image: existing, Created: false}, nil
 			}
 		}
 	}
 
 	timestamp := time.Now().Format(time.RFC3339)
-	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
+	// Concurrent pulls must never publish to the same second-derived identity or filename.
+	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp+":"+crypto.UUIDV4())
 	workDir, err := os.MkdirTemp(infra.GetTempDir(), "mvm-pull-*")
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to create temp dir: %v", err), err)
@@ -315,15 +345,20 @@ func (op *Operation) ImagePull(
 		}
 	}
 	os.Remove(downloadPath)
-	_ = op.Repos.Image.Upsert(ctx, imageItem)
-	if input.SetDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
-	} else if existing != nil && existing.IsDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
+	created, err := op.Repos.Image.SavePulled(ctx, imageItem)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImagePullFailed, "failed to save image", err)
+	}
+	if input.SetDefault || (existing != nil && existing.IsDefault) {
+		if err := op.Repos.Image.SetDefault(ctx, imageItem.ID); err != nil {
+			return &results.ImagePullResult{Image: imageItem, Created: created},
+				errs.WrapMsg(errs.CodeImagePullFailed, "failed to set default image", err)
+		}
+		imageItem.IsDefault = true
 	}
 	// Clean up old entry of the same version (existing is already looked up by version+type).
 	if existing != nil && existing.ID != imageItem.ID {
-		removed := op.Services.Image.RemoveImageFiles(existing)
+		removed := op.Services.Image.RemoveImageFiles(ctx, existing)
 		_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
 		if len(removed) > 0 {
 			slog.Info("Cleaned up old image files", "count", len(removed), "type", spec.Type)
@@ -336,15 +371,31 @@ func (op *Operation) ImagePull(
 			Phase: "complete", Status: "complete", Message: "Image pull complete.",
 		})
 	}
-	return imageItem, nil
+	return &results.ImagePullResult{Image: imageItem, Created: created}, nil
 }
 
-// ImageImport imports a local image file.
+// ImageImport imports a local image file while preserving the existing API shape.
 func (op *Operation) ImageImport(
 	ctx context.Context,
 	input inputs.ImageImportInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
+	result, err := op.ImageImportWithResult(ctx, input, onProgress)
+	if result == nil {
+		return nil, err
+	}
+	return result.Image, err
+}
+
+// ImageImportWithResult distinguishes a new identity from reuse or replacement.
+func (op *Operation) ImageImportWithResult(
+	ctx context.Context,
+	input inputs.ImageImportInput,
+	onProgress event.OnProgressCallback,
+) (_ *results.ImageImportResult, returnErr error) {
+	if input.ResumeID != "" && op.ProvisionerType != provisioner.ProvisionerLoopMount {
+		return nil, errs.New(errs.CodeValidationFailed, "retained local import resume requires the LoopMount backend")
+	}
 	// Resolve import input (arch, format, validation)
 	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image, op.Repos.VM)
 	if err != nil {
@@ -354,7 +405,8 @@ func (op *Operation) ImageImport(
 			err,
 		)
 	}
-	// Sync source VM filesystem before copying rootfs (best-effort)
+	// Preserve the pre-export live-input sync hint outside root lifecycle locks.
+	// SQLite status chooses only this hint, never root source/state authority.
 	if resolved.SourceVM != nil && resolved.SourceVM.Status == model.VMStatusRunning {
 		slog.Debug("Syncing filesystem on source VM before import", "vm", resolved.SourceVM.Name)
 		if client, err := op.vsockClient(ctx, resolved.SourceVM); err == nil {
@@ -364,14 +416,24 @@ func (op *Operation) ImageImport(
 			slog.Warn("Failed to connect to VM for sync before import", "vm", resolved.SourceVM.Name, "error", err)
 		}
 	}
-	existing, _ := op.Repos.Image.GetByVersionAndType(ctx, resolved.Version, resolved.Type)
+	existing, err := op.Repos.Image.GetByVersionAndType(ctx, resolved.Version, resolved.Type)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageImportFailed, "look up imported image", err)
+	}
+	if input.ResumeID != "" && existing != nil {
+		return nil, errs.New(errs.CodeImageImportFailed, "resume conflicts with an already registered image version")
+	}
 	if !resolved.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Image already exists", "path", existing.Path)
 			if resolved.SetDefault {
-				_ = op.Repos.Image.SetDefault(ctx, existing.ID)
+				if err := op.Repos.Image.SetDefault(ctx, existing.ID); err != nil {
+					return &results.ImageImportResult{Image: existing, Created: false},
+						errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
+				}
+				existing.IsDefault = true
 			}
-			return existing, nil
+			return &results.ImageImportResult{Image: existing, Created: false}, nil
 		}
 	}
 	// Format detection warning
@@ -402,27 +464,95 @@ func (op *Operation) ImageImport(
 	defer tl.Complete()
 
 	timestamp := time.Now().Format(time.RFC3339)
-	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
+	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp+":"+crypto.UUIDV4())
+	if input.ResumeID != "" {
+		imageID = input.ResumeID
+	}
+	defer func() {
+		if returnErr != nil && resolved.SourceVM == nil {
+			returnErr = errs.WrapMsg(
+				errs.CodeImageImportFailed,
+				fmt.Sprintf("Local image import failed: %v", returnErr),
+				returnErr,
+				errs.WithDetails(map[string]any{"image_id": imageID}),
+			)
+		}
+	}()
+	sourcePath := *resolved.Source
+	var exportClient *jailersvc.VMRootfsExportClient
+	var releasePending bool
+	releaseRequest := jailersvc.VMRootfsExportReleaseRequest{ImageID: imageID}
+	if resolved.SourceVM != nil {
+		cacheRoot, err := infra.GetCacheDir()
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodeImageImportFailed, "resolve VM export cache", err)
+		}
+		exportClient = jailersvc.NewVMRootfsExportClient()
+		releasePending = true
+		defer func() {
+			if releasePending {
+				_, releaseErr := releaseVMImageExport(context.WithoutCancel(ctx), exportClient, releaseRequest)
+				returnErr = errors.Join(returnErr, releaseErr)
+			}
+		}()
+		copy, err := exportClient.Export(ctx, jailersvc.VMRootfsExportRequest{
+			VMID: resolved.SourceVM.ID, CacheRoot: cacheRoot, ImageID: imageID,
+		})
+		if err != nil {
+			return nil, errs.WrapMsg(
+				errs.CodeImageImportFailed,
+				"VM image export failed",
+				err,
+				errs.WithDetails(map[string]any{"image_id": imageID}),
+			)
+		}
+		sourcePath = copy.CopyPath()
+	}
 	if onProgress != nil {
+		phase, message := "extract", "Extracting image..."
+		if input.ResumeID != "" {
+			phase, message = "resume", "Reopening retained image optimization..."
+		}
 		onProgress(event.Progress{
-			Phase: "extract", Status: "running", Message: "Extracting image...",
+			Phase: phase, Status: "running", Message: message,
 		})
 	}
-	extractedPath, err := op.Services.Image.ExtractImage(
-		ctx,
-		*resolved.Source,
-		imageID,
-		infra.GetImagesDir(),
-		resolved.Format,
-		resolved.Partition,
-		resolved.DisabledDetectors,
-		op.ProvisionerType,
-	)
+	var extractedPath string
+	if input.ResumeID != "" {
+		extractedPath, err = op.Services.Image.ResumeStagedImagePath(ctx, imageID)
+	} else if resolved.SourceVM != nil {
+		extractedPath, err = op.Services.Image.ExtractVMRootfsImage(
+			ctx,
+			sourcePath,
+			imageID,
+			infra.GetImagesDir(),
+			resolved.Partition,
+			resolved.DisabledDetectors,
+			op.ProvisionerType,
+		)
+	} else {
+		extractedPath, err = op.Services.Image.ExtractImage(
+			ctx,
+			sourcePath,
+			imageID,
+			infra.GetImagesDir(),
+			resolved.Format,
+			resolved.Partition,
+			resolved.DisabledDetectors,
+			op.ProvisionerType,
+		)
+	}
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return nil, errs.WrapMsg(errs.CodeImageImportFailed, err.Error(), err)
 		}
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Extraction failed: %v", err), err)
+	}
+	if releasePending {
+		if _, err := releaseVMImageExport(context.WithoutCancel(ctx), exportClient, releaseRequest); err != nil {
+			return nil, err
+		}
+		releasePending = false
 	}
 	tl.Stage("extract")
 
@@ -431,16 +561,16 @@ func (op *Operation) ImageImport(
 			Phase: "optimize", Status: "running", Message: "Debloating and shrinking filesystem...",
 		})
 	}
-	imageItem, _, err := op.Services.Image.OptimizeImage(
-		ctx,
-		extractedPath,
-		imageID,
-		spec,
-		timestamp,
-		input.SkipOptimization,
-		op.ProvisionerType,
-		importWarnings,
-	)
+	var imageItem *model.ImageItem
+	if resolved.SourceVM != nil {
+		imageItem, _, err = op.Services.Image.OptimizeVMRootfsImage(
+			ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, op.ProvisionerType, importWarnings,
+		)
+	} else {
+		imageItem, _, err = op.Services.Image.OptimizeImage(
+			ctx, extractedPath, imageID, spec, timestamp, input.SkipOptimization, op.ProvisionerType, importWarnings,
+		)
+	}
 	if err != nil {
 		if isPartitionDetectionError(err) {
 			return nil, errs.WrapMsg(errs.CodeImageImportFailed, err.Error(), err)
@@ -450,15 +580,20 @@ func (op *Operation) ImageImport(
 	tl.Stage("optimize")
 
 	imageItem.IsImported = true
-	_ = op.Repos.Image.Upsert(ctx, imageItem)
-	if input.SetDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
-	} else if existing != nil && existing.IsDefault {
-		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
+	created, err := op.Repos.Image.SaveImported(ctx, imageItem)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeImageImportFailed, "failed to save image", err)
+	}
+	if input.SetDefault || (existing != nil && existing.IsDefault) {
+		if err := op.Repos.Image.SetDefault(ctx, imageItem.ID); err != nil {
+			return &results.ImageImportResult{Image: imageItem, Created: created},
+				errs.WrapMsg(errs.CodeImageImportFailed, "failed to set default image", err)
+		}
+		imageItem.IsDefault = true
 	}
 	// Clean up old image files of the same version.
 	if existing != nil && existing.Version == imageItem.Version && existing.ID != imageItem.ID {
-		removed := op.Services.Image.RemoveImageFiles(existing)
+		removed := op.Services.Image.RemoveImageFiles(ctx, existing)
 		// Hard-delete when no VMs reference the old image, soft-delete otherwise.
 		vms, vmErr := op.Repos.VM.GetByImageIDs(ctx, []string{existing.ID})
 		if vmErr == nil && len(vms) == 0 {
@@ -477,7 +612,7 @@ func (op *Operation) ImageImport(
 			Phase: "complete", Status: "complete", Message: "Image import complete.",
 		})
 	}
-	return imageItem, nil
+	return &results.ImageImportResult{Image: imageItem, Created: created}, nil
 }
 
 // ImageWarm pre-decompresses images to ready pool for fast VM creation.
@@ -510,7 +645,7 @@ func (op *Operation) ImageWarm(
 			Phase: "warm", Status: "running", Message: "Warming images...",
 		})
 	}
-	warmed, err := op.Services.Image.EnsureCached(images)
+	warmed, err := op.Services.Image.EnsureCached(ctx, images)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageWarmFailed, fmt.Sprintf("Warming failed: %v", err), err)
 	}
@@ -527,6 +662,9 @@ func (op *Operation) ImageWarm(
 
 // ImageRemove removes images by input.
 func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult {
+	if result := op.imageRemoveUnrecordedExport(ctx, input, force); result != nil {
+		return result
+	}
 	results := make([]errs.OperationResult, 0)
 	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
@@ -551,6 +689,19 @@ func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, f
 				Message:   fmt.Sprintf("Image '%s' is in use by %d VM(s)", img.ID, len(img.VMs)),
 				Exception: fmt.Errorf("image in use by %d VMs", len(img.VMs)),
 			})
+			continue
+		}
+		if err := releasePresentVMImageExport(ctx, img.ID); err != nil {
+			results = append(
+				results,
+				errs.OperationResult{
+					Status:    "error",
+					Code:      string(errs.CodeImageImportFailed),
+					Item:      img,
+					Message:   err.Error(),
+					Exception: err,
+				},
+			)
 			continue
 		}
 		if err := op.Services.Image.RemoveImage(ctx, img, force); err != nil {

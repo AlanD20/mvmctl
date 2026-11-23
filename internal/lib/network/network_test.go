@@ -286,6 +286,17 @@ func TestGenerateMAC(t *testing.T) {
 	})
 }
 
+// Rationale: VM creation passes generated MACs to a privileged launch boundary that requires
+// canonical lower-case EUI-48 text, while the configurable default prefix is upper-case.
+func TestVMGenerateMACUsesCanonicalLowercase(t *testing.T) {
+	t.Parallel()
+
+	for _, prefix := range []string{"", "02:FC", "02:fc"} {
+		got := libnet.VMGenerateMAC(prefix)
+		assert.Regexp(t, `^02:fc(:[0-9a-f]{2}){4}$`, got, "prefix %q", prefix)
+	}
+}
+
 // --- AllocateNextIP ---
 // Rationale: Core IP allocation logic. Must skip network/base addresses,
 // skip gateway, skip existing IPs, handle /31 and /32 edge cases, and

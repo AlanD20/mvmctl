@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 
+	"mvmctl/internal/cli/common"
 	"mvmctl/pkg/api"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,9 @@ func NewSelfUpdateCmd(op api.API) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if common.RecordResult(result) {
+					return nil
+				}
 				if result.HasUpdate {
 					fmt.Printf("Update available: v%s → v%s\n", result.CurrentVersion, result.LatestVersion)
 				} else {
@@ -40,11 +44,19 @@ func NewSelfUpdateCmd(op api.API) *cobra.Command {
 					return err
 				}
 				if !result.HasUpdate && !force {
+					if common.RecordResult(result) {
+						return nil
+					}
 					fmt.Printf("Already up to date (v%s)\n", result.CurrentVersion)
 					return nil
 				}
 				if err := op.SelfUpdateApply(cmd.Context(), force); err != nil {
 					return err
+				}
+				if common.RecordResult(struct {
+					Version string `json:"version"`
+				}{Version: result.LatestVersion}) {
+					return nil
 				}
 				fmt.Printf("Updated to v%s\n", result.LatestVersion)
 				fmt.Println("Restart any running daemons (console relay, nocloud-net) to pick up the new version.")

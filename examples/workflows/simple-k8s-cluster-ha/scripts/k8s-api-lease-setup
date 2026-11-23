@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+[[ $# == 2 && $1 =~ ^[0-9a-f]{32}$ && $2 =~ ^10\.10\.0\.(10|11|12)$ ]] || exit 1
+umask 077
+printf 'RESOURCE_ID=%s\nPRIMARY_IP=%s\n' "$1" "$2" > /etc/k8s-api-lease.conf
+cat > /etc/systemd/system/k8s-api-lease.service <<'UNIT'
+[Unit]
+Description=Kubernetes API floating IP finite lease
+After=network-online.target mvm-agent.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/k8s-api-lease
+ExecStopPost=/usr/local/bin/k8s-api-lease release
+Restart=on-failure
+RestartSec=1
+TimeoutStopSec=12
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now k8s-api-lease.service

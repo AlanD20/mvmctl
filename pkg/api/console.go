@@ -5,13 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/service/console"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
-	"path/filepath"
 )
 
 // ConsoleAPI defines the public interface for console relay operations.
@@ -26,19 +25,18 @@ type ConsoleAPI interface {
 // Returns running status, PID, and socket path.
 // On VM not found, raises VMNotFoundError — Go returns error.
 func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (*results.ConsoleStateResult, error) {
-	resolved, err := op.resolveConsole(ctx, identifier)
+	vmEntity, err := op.resolveConsoleVM(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
-	pidVal, pidOK := resolved.Relay.PID()
-	var pidPtr *int
-	if pidOK {
-		pidPtr = &pidVal
+	observed, err := op.consoleAuthority().Observe(ctx, jailer.ConsoleObserveRequest{VMID: vmEntity.ID})
+	if err != nil {
+		return nil, err
 	}
 	return &results.ConsoleStateResult{
-		Running:    resolved.Relay.IsRunning(),
-		PID:        pidPtr,
-		SocketPath: resolved.Relay.SocketPath(),
+		Running:    observed.State == jailer.ConsoleRunning,
+		PID:        observed.PID,
+		SocketPath: observed.SocketPath,
 	}, nil
 }
 
@@ -48,11 +46,15 @@ func (op *Operation) ConsoleGetConnectionInfo(
 	ctx context.Context,
 	identifier string,
 ) (*model.ConsoleConnectionInfo, error) {
-	resolved, err := op.resolveConsole(ctx, identifier)
+	vmEntity, err := op.resolveConsoleVM(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
-	if !resolved.Relay.IsRunning() {
+	observed, err := op.consoleAuthority().Observe(ctx, jailer.ConsoleObserveRequest{VMID: vmEntity.ID})
+	if err != nil {
+		return nil, err
+	}
+	if observed.State != jailer.ConsoleRunning {
 		return nil, errs.New(
 			errs.CodeConsoleRelayFailed,
 			fmt.Sprintf("No console relay running for VM '%s'", identifier),
@@ -60,9 +62,9 @@ func (op *Operation) ConsoleGetConnectionInfo(
 		)
 	}
 	return &model.ConsoleConnectionInfo{
-		SocketPath: resolved.Relay.SocketPath(),
-		VMName:     resolved.VM.Name,
-		VMID:       resolved.VM.ID,
+		SocketPath: observed.SocketPath,
+		VMName:     vmEntity.Name,
+		VMID:       vmEntity.ID,
 	}, nil
 }
 
@@ -70,19 +72,21 @@ func (op *Operation) ConsoleGetConnectionInfo(
 // Returns error. Resolution errors propagate as error (not wrapped in
 // OperationResult)
 func (op *Operation) ConsoleKill(ctx context.Context, identifier string) error {
-	resolved, err := op.resolveConsole(ctx, identifier)
+	vmEntity, err := op.resolveConsoleVM(ctx, identifier)
 	if err != nil {
 		return err
 	}
-	if !resolved.Relay.IsRunning() {
+	result, err := op.consoleAuthority().Stop(ctx, jailer.ConsoleStopRequest{VMID: vmEntity.ID})
+	if err != nil {
+		return err
+	}
+	if !result.Stopped {
 		return errs.New(errs.CodeConsoleNotRunning, fmt.Sprintf("No console relay running for '%s'", identifier))
 	}
-	killed := resolved.Relay.Stop(true)
-	if killed {
+	if op.AuditLog != nil {
 		op.AuditLog.LogOperation("console.kill", map[string]any{"name": identifier}, "")
-		return nil
 	}
-	return errs.New(errs.CodeConsoleKillFailed, fmt.Sprintf("Failed to stop console relay for '%s'", identifier))
+	return nil
 }
 
 // ConsoleAttachConsole attaches to a running console relay in interactive mode.
@@ -97,22 +101,28 @@ func (op *Operation) ConsoleAttachConsole(
 	return console.InteractiveAttach(ctx, socketPath, stdin, stdout)
 }
 
-// resolveConsole resolves a VM identifier and creates a console relay.
-// The relay creation is done here (API layer) rather than in the input resolver
-// to avoid importing internal/service/console from the inputs package.
-func (op *Operation) resolveConsole(ctx context.Context, identifier string) (*inputs.ResolvedConsoleInput, error) {
+// resolveConsoleVM resolves display identity; root owns every process and endpoint decision.
+func (op *Operation) resolveConsoleVM(ctx context.Context, identifier string) (*model.VMItem, error) {
 	rawInput := inputs.ConsoleInput{Identifier: identifier}
-	// Resolve VM first to get ID and name required for relay creation
+	if err := rawInput.Validate(); err != nil {
+		return nil, err
+	}
 	vmInput := inputs.VMInput{Identifiers: []string{rawInput.Identifier}}
 	vms, err := vmInput.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return nil, err
 	}
-	vmEntity := vms[0]
-	// Create relay manager.
-	vmDir := infra.GetVMDirByID(vmEntity.ID)
-	pidPath := filepath.Join(vmDir, console.DefaultConsolePIDFilename)
-	socketPath := filepath.Join(vmDir, console.DefaultConsoleSocketFilename)
-	relay := console.NewRelay(vmEntity.Name, pidPath, socketPath)
-	return rawInput.Resolve(vmEntity, relay)
+	return vms[0], nil
+}
+
+type consoleAuthorityClient interface {
+	Observe(context.Context, jailer.ConsoleObserveRequest) (jailer.ConsoleObserveResult, error)
+	Stop(context.Context, jailer.ConsoleStopRequest) (jailer.ConsoleStopResult, error)
+}
+
+func (op *Operation) consoleAuthority() consoleAuthorityClient {
+	if op.consoleClient != nil {
+		return op.consoleClient
+	}
+	return jailer.NewConsoleClient()
 }

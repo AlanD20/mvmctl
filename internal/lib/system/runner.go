@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,22 +21,25 @@ import (
 // RunCmdOpts configures subprocess execution.
 // Zero values use sensible defaults.
 //
-// Env is merged into the current process environment (never replaces).
+// Env is merged into the current process environment unless ReplaceEnv is true.
 // Interactive controls sudo mode:
 // - true  → plain "sudo" (allows password prompt via TTY forwarding)
 // - false → "sudo -n" (non-interactive, fails immediately if password required)
 //
 // Default is false (non-interactive), suitable for automated operations.
 type RunCmdOpts struct {
-	Check       bool              // return error on non-zero exit
-	Capture     bool              // capture stdout/stderr
-	Cwd         string            // working directory
-	Timeout     time.Duration     // execution timeout
-	Input       string            // stdin content
-	Env         map[string]string // merged into process environment (append, never replace)
-	Privileged  bool              // run via sudo if not root
-	Interactive bool              // allow sudo password prompt
-	StartOnly   bool              // spawn and forget (no wait)
+	Check          bool              // return error on non-zero exit
+	Capture        bool              // capture stdout/stderr
+	Cwd            string            // working directory
+	Timeout        time.Duration     // execution timeout
+	Input          string            // stdin content
+	Env            map[string]string // command environment values
+	ReplaceEnv     bool              // replace rather than inherit the process environment
+	MaxStdoutBytes int               // zero is unlimited; requires Capture
+	MaxStderrBytes int               // zero is unlimited; requires Capture
+	Privileged     bool              // run via sudo if not root
+	Interactive    bool              // allow sudo password prompt
+	StartOnly      bool              // spawn and forget (no wait)
 }
 
 // DefaultGracefulTimeout is the default timeout for graceful SIGTERM shutdown.
@@ -46,6 +50,49 @@ const DefaultKillTimeout = 5 * time.Second
 
 // POSIX convention: exit code = 128 + signal number for signal death.
 const signalExitCodeBase = 128
+
+var errCommandOutputLimit = errors.New("command output exceeded capture limit")
+
+type boundedCaptureWriter struct {
+	builder  strings.Builder
+	limit    int
+	exceeded bool
+}
+
+func newBoundedCaptureWriter(limit int) *boundedCaptureWriter {
+	return &boundedCaptureWriter{limit: limit}
+}
+
+func (writer *boundedCaptureWriter) Write(content []byte) (int, error) {
+	if writer.limit == 0 {
+		return writer.builder.Write(content)
+	}
+	if len(content) == 0 {
+		return 0, nil
+	}
+	remaining := writer.limit - writer.builder.Len()
+	if remaining > 0 && len(content) <= remaining {
+		return writer.builder.Write(content)
+	}
+	if remaining > 0 {
+		if _, err := writer.builder.Write(content[:remaining]); err != nil {
+			return 0, err
+		}
+	}
+	writer.exceeded = true
+	return len(content), nil
+}
+
+func (writer *boundedCaptureWriter) String() string {
+	if writer == nil {
+		return ""
+	}
+	return writer.builder.String()
+}
+
+func (writer *boundedCaptureWriter) Exceeded() bool {
+	return writer != nil && writer.exceeded
+}
 
 // --- Static helpers ---
 
@@ -329,6 +376,15 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 	if len(args) == 0 {
 		return &RunResult{ExitCode: 1}, fmt.Errorf("no command specified")
 	}
+	if opts.MaxStdoutBytes < 0 || opts.MaxStderrBytes < 0 {
+		return &RunResult{ExitCode: 1}, errs.New(errs.CodeProcessError, "command capture limit cannot be negative")
+	}
+	if !opts.Capture && (opts.MaxStdoutBytes != 0 || opts.MaxStderrBytes != 0) {
+		return &RunResult{ExitCode: 1}, errs.New(
+			errs.CodeProcessError,
+			"command capture limits require captured output",
+		)
+	}
 
 	// --- Build argument list, handling privileged mode ---
 	cmdArgs := args
@@ -355,13 +411,8 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 		cmd.Dir = opts.Cwd
 	}
 
-	// Environment: merge into current process env (always append)
-	if opts.Env != nil {
-		env := os.Environ()
-		for k, v := range opts.Env {
-			env = append(env, k+"="+v)
-		}
-		cmd.Env = env
+	if environment := commandEnvironment(opts); environment != nil {
+		cmd.Env = environment
 	}
 
 	// --- Stdin ---
@@ -372,10 +423,12 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 	}
 
 	// --- Stdout / Stderr ---
-	var stdout, stderr strings.Builder
+	var stdout, stderr *boundedCaptureWriter
 	if opts.Capture {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
+		stdout = newBoundedCaptureWriter(opts.MaxStdoutBytes)
+		stderr = newBoundedCaptureWriter(opts.MaxStderrBytes)
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
 	} else {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -391,15 +444,12 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 	}
 
 	// --- Run and capture ---
-	err := cmd.Run()
-
-	result := &RunResult{
-		ExitCode: 0,
+	runErr := cmd.Run()
+	result, captureErr := capturedRunResult(stdout, stderr, runErr)
+	if stdout.Exceeded() || stderr.Exceeded() {
+		return result, captureErr
 	}
-	if opts.Capture {
-		result.Stdout = stdout.String()
-		result.Stderr = strings.TrimSpace(stderr.String())
-	}
+	err := captureErr
 
 	if err != nil {
 		// 1. Timeout — must check BEFORE exit-error because CommandContext
@@ -410,8 +460,12 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 			if !strings.ContainsRune(timeoutStr, '.') {
 				timeoutStr += ".0"
 			}
-			return result, errs.New(errs.CodeProcessError,
-				fmt.Sprintf("Command timed out after %ss: %s", timeoutStr, cmdArgs[0]))
+			return result, errs.WrapMsg(
+				errs.CodeProcessError,
+				fmt.Sprintf("Command timed out after %ss: %s", timeoutStr, cmdArgs[0]),
+				runCtx.Err(),
+				errs.WithClass(errs.ClassInternal),
+			)
 		}
 
 		// 2. Command not found
@@ -446,10 +500,61 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 	return result, nil
 }
 
+func commandEnvironment(opts RunCmdOpts) []string {
+	if opts.Env == nil && !opts.ReplaceEnv {
+		return nil
+	}
+	environment := make([]string, 0, len(opts.Env))
+	if !opts.ReplaceEnv {
+		environment = append(environment, os.Environ()...)
+	}
+	keys := make([]string, 0, len(opts.Env))
+	for key := range opts.Env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		environment = append(environment, key+"="+opts.Env[key])
+	}
+	return environment
+}
+
+func capturedRunResult(
+	stdout *boundedCaptureWriter,
+	stderr *boundedCaptureWriter,
+	processErr error,
+) (*RunResult, error) {
+	result := &RunResult{
+		Stdout:   stdout.String(),
+		Stderr:   strings.TrimSpace(stderr.String()),
+		ExitCode: 0,
+	}
+	if stdout.Exceeded() {
+		result.ExitCode = -1
+		return result, errs.WrapMsg(
+			errs.CodeProcessError,
+			"command stdout exceeded capture limit",
+			errCommandOutputLimit,
+		)
+	}
+	if stderr.Exceeded() {
+		result.ExitCode = -1
+		return result, errs.WrapMsg(
+			errs.CodeProcessError,
+			"command stderr exceeded capture limit",
+			errCommandOutputLimit,
+		)
+	}
+	return result, processErr
+}
+
 // Stream executes a command and streams stdout lines as they are produced.
 func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts) (<-chan StreamLine, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("no command specified")
+	}
+	if opts.MaxStdoutBytes != 0 || opts.MaxStderrBytes != 0 {
+		return nil, errs.New(errs.CodeProcessError, "command capture limits are unavailable for streaming output")
 	}
 
 	// Build command with privileged mode
@@ -478,6 +583,9 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 	cmd := exec.CommandContext(runCtx, cmdArgs[0], cmdArgs[1:]...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
+	}
+	if environment := commandEnvironment(opts); environment != nil {
+		cmd.Env = environment
 	}
 
 	// CRITICAL: Use a process group so context cancellation kills the entire

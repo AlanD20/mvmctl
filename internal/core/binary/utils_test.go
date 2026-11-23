@@ -45,9 +45,3 @@ func TestCIVersion(t *testing.T) {
 		})
 	}
 }
-
-func TestRustTargetTriple(t *testing.T) {
-	got := rustTargetTriple()
-	// Should return something reasonable for the current arch
-	assert.Contains(t, got, "-unknown-linux-musl")
-}

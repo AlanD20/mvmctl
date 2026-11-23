@@ -4,7 +4,7 @@ set -e
 hostnamectl set-hostname builder 2>/dev/null || true
 
 apt-get update
-apt-get install -y vim netcat-openbsd curl wget htop tmux dnsutils iproute2 iputils-ping traceroute ethtool tcpdump lsof strace tree git jq keepalived
+apt-get install -y vim netcat-openbsd curl wget htop tmux dnsutils iproute2 iputils-ping traceroute ethtool tcpdump lsof strace tree git jq
 apt-get install -y ca-certificates curl gpg
 
 curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
@@ -27,7 +27,6 @@ ctr image pull quay.io/cilium/operator-generic:v1.19.3 2>/dev/null || true
 ctr image pull quay.io/cilium/hubble-relay:v1.19.3 2>/dev/null || true
 ctr image pull quay.io/cilium/hubble-ui:v1.19.3 2>/dev/null || true
 ctr image pull quay.io/cilium/hubble-ui-backend:v1.19.3 2>/dev/null || true
-ctr image pull ghcr.io/kube-vip/kube-vip:v0.9.1 2>/dev/null || true
 
 cat > /etc/modules-load.d/k8s.conf <<'EOF'
 overlay
@@ -42,3 +41,9 @@ net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
 EOF
 sysctl --system || true
+
+# Separate readers prevent worker relay requests from reading controller join material.
+for reader in controller-reader worker-reader; do
+  id "$reader" >/dev/null 2>&1 || useradd --system --shell /bin/sh "$reader"
+done
+install -d -m 0755 /srv/k8s

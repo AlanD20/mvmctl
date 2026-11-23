@@ -3,6 +3,7 @@ package binary
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
@@ -33,35 +34,45 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.BinaryItem, err
 func (r *sqliteRepo) FindByPrefix(
 	ctx context.Context,
 	prefix string,
+	architecture string,
 	includeDeleted ...bool,
 ) ([]*model.BinaryItem, error) {
-	query := `SELECT * FROM binaries WHERE id LIKE ?`
+	query := `SELECT * FROM binaries WHERE id LIKE ? AND architecture = ?`
 	if len(includeDeleted) == 0 || !includeDeleted[0] {
 		query += ` AND deleted_at IS NULL`
 	}
 	var items []*model.BinaryItem
-	return items, r.db.SelectContext(ctx, &items, query, prefix+"%")
+	return items, r.db.SelectContext(ctx, &items, query, prefix+"%", architecture)
 }
 
-func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.BinaryItem, error) {
+func (r *sqliteRepo) ListAll(ctx context.Context, architecture string) ([]*model.BinaryItem, error) {
 	var items []*model.BinaryItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM binaries ORDER BY created_at`)
+		`SELECT * FROM binaries WHERE architecture = ? AND deleted_at IS NULL ORDER BY created_at`, architecture)
 }
 
-func (r *sqliteRepo) ListByType(ctx context.Context, typ string) ([]*model.BinaryItem, error) {
+func (r *sqliteRepo) ListByType(ctx context.Context, typ, architecture string) ([]*model.BinaryItem, error) {
 	var items []*model.BinaryItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM binaries WHERE type = ? AND deleted_at IS NULL  ORDER BY created_at`, typ)
+		`SELECT * FROM binaries
+		 WHERE type = ? AND architecture = ? AND deleted_at IS NULL
+		 ORDER BY created_at`, typ, architecture)
 }
 
-func (r *sqliteRepo) GetByTypeAndVersion(ctx context.Context, typ, version string) (*model.BinaryItem, error) {
+func (r *sqliteRepo) GetByTypeAndVersion(
+	ctx context.Context,
+	typ string,
+	architecture string,
+	version string,
+) (*model.BinaryItem, error) {
 	var b model.BinaryItem
 	err := r.db.GetContext(
 		ctx,
 		&b,
-		`SELECT * FROM binaries WHERE type = ? AND version = ? AND deleted_at IS NULL `,
+		`SELECT * FROM binaries
+		 WHERE type = ? AND architecture = ? AND version = ? AND deleted_at IS NULL`,
 		typ,
+		architecture,
 		version,
 	)
 	if err == sql.ErrNoRows {
@@ -73,11 +84,12 @@ func (r *sqliteRepo) GetByTypeAndVersion(ctx context.Context, typ, version strin
 func (r *sqliteRepo) Upsert(ctx context.Context, b *model.BinaryItem) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO binaries (
-			id, type, version, full_version, ci_version, path,
+			id, type, architecture, version, full_version, ci_version, path,
 			is_default, is_present, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			type = excluded.type,
+			architecture = excluded.architecture,
 			version = excluded.version,
 			full_version = excluded.full_version,
 			ci_version = excluded.ci_version,
@@ -86,7 +98,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, b *model.BinaryItem) error {
 			is_present = excluded.is_present,
 			updated_at = CURRENT_TIMESTAMP,
 			deleted_at = excluded.deleted_at`,
-		b.ID, b.Type, b.Version, b.FullVersion, b.CIVersion, b.Path,
+		b.ID, b.Type, b.Architecture, b.Version, b.FullVersion, b.CIVersion, b.Path,
 		infra.BoolToInt(b.IsDefault), infra.BoolToInt(b.IsPresent),
 		b.CreatedAt, b.UpdatedAt, b.DeletedAt,
 	)
@@ -112,20 +124,21 @@ func (r *sqliteRepo) DeleteByTypeAndVersion(ctx context.Context, typ, version st
 	return err
 }
 
-func (r *sqliteRepo) SetDefault(ctx context.Context, typ, id string) error {
+func (r *sqliteRepo) SetDefault(ctx context.Context, typ, architecture, id string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx,
-		`UPDATE binaries SET is_default = 0 WHERE type = ? AND deleted_at IS NULL`, typ)
+		`UPDATE binaries SET is_default = 0
+		 WHERE type = ? AND architecture = ? AND deleted_at IS NULL`, typ, architecture)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
 		`UPDATE binaries SET is_default = 1, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND deleted_at IS NULL`, id)
+		WHERE id = ? AND type = ? AND architecture = ? AND deleted_at IS NULL`, id, typ, architecture)
 	if err != nil {
 		return err
 	}
@@ -138,10 +151,11 @@ func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	return count, err
 }
 
-func (r *sqliteRepo) GetDefault(ctx context.Context, typ string) (*model.BinaryItem, error) {
+func (r *sqliteRepo) GetDefault(ctx context.Context, typ, architecture string) (*model.BinaryItem, error) {
 	var b model.BinaryItem
 	err := r.db.GetContext(ctx, &b,
-		`SELECT * FROM binaries WHERE type = ? AND is_default = 1 AND deleted_at IS NULL `, typ)
+		`SELECT * FROM binaries
+		 WHERE type = ? AND architecture = ? AND is_default = 1 AND deleted_at IS NULL`, typ, architecture)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -169,5 +183,150 @@ func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, ids []string, pres
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE binaries SET is_present = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (`+placeholders+`)`,
 		args...)
+	return err
+}
+
+func (r *sqliteRepo) ReplaceReleaseProjection(
+	ctx context.Context,
+	architecture string,
+	version string,
+	pair *model.BinaryPair,
+	setDefault bool,
+) error {
+	if err := validateReleaseProjectionPair(architecture, version, pair); err != nil {
+		return err
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Rollback is intentionally best-effort after Commit; sql.Tx reports sql.ErrTxDone.
+		_ = tx.Rollback()
+	}()
+
+	members := []*model.BinaryItem{pair.Firecracker, pair.Jailer}
+	for _, member := range members {
+		var wasDefault bool
+		if err := tx.GetContext(
+			ctx,
+			&wasDefault,
+			`SELECT EXISTS(
+				SELECT 1 FROM binaries
+				WHERE type = ? AND architecture = ? AND version = ?
+				  AND deleted_at IS NULL AND is_default = 1
+			)`,
+			member.Type,
+			architecture,
+			version,
+		); err != nil {
+			return err
+		}
+		memberDefault := setDefault || wasDefault
+
+		if _, err := tx.ExecContext(
+			ctx,
+			`UPDATE binaries
+			 SET is_default = 0,
+			     is_present = 0,
+			     deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP),
+			     updated_at = CURRENT_TIMESTAMP
+			 WHERE type = ? AND architecture = ? AND version = ?
+			   AND deleted_at IS NULL AND id <> ?`,
+			member.Type,
+			architecture,
+			version,
+			member.ID,
+		); err != nil {
+			return err
+		}
+		if memberDefault {
+			if _, err := tx.ExecContext(
+				ctx,
+				`UPDATE binaries SET is_default = 0, updated_at = CURRENT_TIMESTAMP
+				 WHERE type = ? AND architecture = ? AND deleted_at IS NULL`,
+				member.Type,
+				architecture,
+			); err != nil {
+				return err
+			}
+		}
+		if err := upsertReleaseProjectionMember(ctx, tx, member, memberDefault); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (r *sqliteRepo) RemoveReleaseProjection(ctx context.Context, architecture, version string) error {
+	_, err := r.db.ExecContext(
+		ctx,
+		`UPDATE binaries
+		 SET is_default = 0,
+		     is_present = 0,
+		     deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP),
+		     updated_at = CURRENT_TIMESTAMP
+		 WHERE architecture = ? AND version = ? AND deleted_at IS NULL`,
+		architecture,
+		version,
+	)
+	return err
+}
+
+func validateReleaseProjectionPair(architecture, version string, pair *model.BinaryPair) error {
+	if architecture == "" || version == "" || pair == nil || pair.Firecracker == nil || pair.Jailer == nil {
+		return fmt.Errorf("complete binary release projection is required")
+	}
+	if pair.Firecracker.ID == pair.Jailer.ID {
+		return fmt.Errorf("binary release projection members require independent IDs")
+	}
+	for _, member := range []*model.BinaryItem{pair.Firecracker, pair.Jailer} {
+		if member.ID == "" || member.Architecture != architecture || member.Version != version ||
+			!member.IsPresent || member.DeletedAt != nil {
+			return fmt.Errorf("binary release projection member does not match slot %s/%s", architecture, version)
+		}
+	}
+	if pair.Firecracker.Type != "firecracker" || pair.Jailer.Type != "jailer" {
+		return fmt.Errorf("binary release projection requires Firecracker and Jailer members")
+	}
+	return nil
+}
+
+func upsertReleaseProjectionMember(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	member *model.BinaryItem,
+	isDefault bool,
+) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO binaries (
+			id, type, architecture, version, full_version, ci_version, path,
+			is_default, is_present, created_at, updated_at, deleted_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+		ON CONFLICT(id) DO UPDATE SET
+			type = excluded.type,
+			architecture = excluded.architecture,
+			version = excluded.version,
+			full_version = excluded.full_version,
+			ci_version = excluded.ci_version,
+			path = excluded.path,
+			is_default = excluded.is_default,
+			is_present = 1,
+			updated_at = excluded.updated_at,
+			deleted_at = NULL`,
+		member.ID,
+		member.Type,
+		member.Architecture,
+		member.Version,
+		member.FullVersion,
+		member.CIVersion,
+		member.Path,
+		infra.BoolToInt(isDefault),
+		member.CreatedAt,
+		member.UpdatedAt,
+	)
 	return err
 }

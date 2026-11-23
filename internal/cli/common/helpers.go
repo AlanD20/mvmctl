@@ -8,11 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"syscall"
-
-	"github.com/dustin/go-humanize"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
@@ -41,6 +38,9 @@ import (
 func HandleErrors(fn func() error) func() error {
 	return func() (err error) {
 		err = fn()
+		if StructuredOutput() {
+			return err
+		}
 		if err == nil {
 			return nil
 		}
@@ -180,61 +180,32 @@ func formatUnexpected(err error) string {
 	return err.Error()
 }
 
-// FormatSpeed formats bytes-per-second as a human-readable transfer speed
-// using go-humanize (e.g. "5.2 MiB/s").
-func FormatSpeed(bytesPerSec float64) string {
-	if bytesPerSec < 1 {
-		return "0 B/s"
-	}
-	return humanize.Bytes(uint64(bytesPerSec)) + "/s"
-}
-
 // SudoResult carries the outcome of a sudo subprocess.
 type SudoResult struct {
 	Success    bool
 	ReturnCode int
 }
 
-// RunWithSudo runs args via "sudo env ..." forwarding all MVM_* env vars
-// as well as HOME and PATH. extraEnv are additional KEY=VALUE pairs placed
-// after scanned vars so they take precedence (env uses last-wins).
-func RunWithSudo(ctx context.Context, args []string, extraEnv ...string) SudoResult {
-	mvmBin, err := os.Executable()
-	if err != nil {
-		mvmBin, err = exec.LookPath(infra.CLIName)
-		if err != nil {
-			mvmBin = infra.CLIName
-		}
-	}
-
-	// Build env var assignments — passed via the 'env' utility to sudo.
-	// Scanned vars first, then extraEnv so explicit overrides win.
-	envAssignments := []string{}
-	for _, env := range os.Environ() {
-		if strings.HasPrefix(env, "MVM_") {
-			envAssignments = append(envAssignments, env)
-		}
-	}
-	for _, key := range []string{"HOME", "PATH"} {
-		if val, ok := os.LookupEnv(key); ok {
-			envAssignments = append(envAssignments, key+"="+val)
-		}
-	}
-	envAssignments = append(envAssignments, extraEnv...)
-
+// RunHostInitWithSudo runs administrator host initialization through the system installation.
+// CRITICAL: ADR-0016 forbids user-owned sudo targets and caller-selected root arguments.
+// The early administrator route sanitizes the inherited environment before setup.
+func RunHostInitWithSudo(ctx context.Context) SudoResult {
 	Cli.Info("")
 	Cli.Info("Running host init with sudo...")
 
-	// Use system.RunCmdCompat with the env utility to properly pass environment
-	// variables through sudo's env_reset.
-	cmdArgs := append([]string{mvmBin}, args...)
-	runArgs := append([]string{"env"}, append(envAssignments, cmdArgs...)...)
-	result, err := system.DefaultRunner.Run(ctx, runArgs, system.RunCmdOpts{
-		Capture:     false,
-		Check:       false,
-		Privileged:  true,
-		Interactive: true,
-	})
+	result, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{infra.SystemBinaryPath, "host", "init"},
+		system.RunCmdOpts{
+			Capture:     false,
+			Check:       false,
+			Privileged:  true,
+			Interactive: true,
+		},
+	)
+	if err != nil && result == nil {
+		return SudoResult{Success: false, ReturnCode: -1}
+	}
 	if err != nil || !result.Success() {
 		return SudoResult{Success: false, ReturnCode: result.ExitCode}
 	}

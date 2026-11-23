@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -55,26 +56,58 @@ func (s *ImageImportStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
+	if saved.Output != nil {
+		prior := StateFromMap[ImageImportState](saved.Output)
+		if prior == nil || prior.ImageID == "" {
+			return fmt.Errorf("%s: saved image identity is invalid", s.Name())
+		}
+		if saved.Meta.SpecHash != s.specHash {
+			return fmt.Errorf("%s: declaration changed; destroy saved state before changing the declaration", s.Name())
+		}
+		item, err := s.op.ImageGet(ctx, inputs.ImageInput{Identifiers: []string{prior.ImageID}})
+		if err != nil {
+			return err
+		}
+		if item == nil || item.ID != prior.ImageID {
+			return fmt.Errorf("%s: saved image is missing", s.Name())
+		}
+		s.saved = prior
+		s.meta = saved.Meta
+		state.Set(s.Name(), prior)
+		return write(ctx, s.StateData())
+	}
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "importing image"})
 	// Wrap onProgress to inject step name into API-level progress events.
 	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
-	img, err := s.op.ImageImport(ctx, s.input, stepProgress)
-	if err != nil {
-		return err
+	input := s.input
+	var err error
+	if strings.HasPrefix(input.Source, "@vm:") {
+		input.Source, err = resolveResourceReference(state, input.Source)
+		if err != nil {
+			return err
+		}
+	}
+	result, err := s.op.ImageImportWithResult(ctx, input, stepProgress)
+	if result == nil || result.Image == nil || result.Image.ID == "" {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("%s: image import returned no result", s.Name())
 	}
 
 	s.saved = &ImageImportState{
-		ImageID: img.ID,
+		ImageID: result.Image.ID,
 	}
 	s.meta = model.ResourceMeta{
-		WasCreated: true,
+		WasCreated: result.Created,
 		SpecHash:   s.specHash,
 	}
 	state.Set(s.Name(), s.saved)
-	if err := write(ctx, s.StateData()); err != nil {
-		return fmt.Errorf("persist step state: %w", err)
+	// Preserve committed ownership even when a later acquisition effect failed.
+	if writeErr := write(context.WithoutCancel(ctx), s.StateData()); writeErr != nil {
+		return errors.Join(err, fmt.Errorf("persist step state: %w", writeErr))
 	}
-	return nil
+	return err
 }
 
 func (s *ImageImportStep) Destroy(
@@ -135,11 +168,6 @@ func newImageImportStepFromSpec(
 ) (workflow.Step, error) {
 	if op == nil {
 		return nil, errors.New("operation not initialized")
-	}
-
-	// Strip "type:" prefix from VM step reference in "source" field.
-	if s, ok := spec["source"].(string); ok {
-		spec["source"] = stripBareName(s)
 	}
 
 	data, err := yaml.Marshal(spec)

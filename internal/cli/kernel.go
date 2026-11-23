@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -55,7 +54,6 @@ func NewKernelCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.Comma
 }
 
 func newKernelListCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.Command {
-	var jsonOutput bool
 	var longOutput bool
 	var remote bool
 	var noCache bool
@@ -72,12 +70,7 @@ func newKernelListCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.C
 					return err
 				}
 
-				if jsonOutput {
-					if remoteVersions == nil {
-						remoteVersions = []model.VersionInfo{}
-					}
-					b, _ := json.MarshalIndent(remoteVersions, "", "  ")
-					fmt.Println(string(b))
+				if common.RecordListResult(remoteVersions) {
 					return nil
 				}
 
@@ -96,12 +89,7 @@ func newKernelListCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.C
 				return err
 			}
 
-			if jsonOutput {
-				if kernels == nil {
-					kernels = []*model.KernelItem{}
-				}
-				b, _ := json.MarshalIndent(kernels, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordListResult(kernels) {
 				return nil
 			}
 
@@ -112,7 +100,6 @@ func newKernelListCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.C
 		},
 	}
 
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&longOutput, "long", false, "Show full listing with all columns")
 	cmd.Flags().BoolVarP(&remote, "remote", "r", false, "Show available remote kernel versions")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
@@ -202,6 +189,7 @@ Examples:
 					prog.UpdateText(e.Message)
 				}
 			})
+			common.RecordResult(kernelItem)
 			prog.Stop()
 			if err != nil {
 				return err
@@ -246,6 +234,9 @@ func newKernelRemoveCmd(kernelAPI api.KernelAPI) *cobra.Command {
 				cmd.Context(),
 				inputs.KernelInput{Identifiers: args, Force: force, IncludeDeleted: true},
 			)
+			if common.StructuredOutput() {
+				return common.RecordBatch(result)
+			}
 			for _, item := range result.Items {
 				if item.IsOK() {
 					msg := item.Message
@@ -274,7 +265,6 @@ func newKernelRemoveCmd(kernelAPI api.KernelAPI) *cobra.Command {
 }
 
 func newKernelInspectCmd(kernelAPI api.KernelAPI) *cobra.Command {
-	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:               "inspect [selector]",
@@ -289,9 +279,7 @@ func newKernelInspectCmd(kernelAPI api.KernelAPI) *cobra.Command {
 				return err
 			}
 
-			if jsonOutput {
-				b, _ := json.MarshalIndent(info, "", "  ")
-				fmt.Println(string(b))
+			if common.RecordResult(info) {
 				return nil
 			}
 
@@ -303,8 +291,6 @@ func newKernelInspectCmd(kernelAPI api.KernelAPI) *cobra.Command {
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 
 	return cmd
 }
@@ -372,6 +358,7 @@ Examples:
 				SetDefault: setDefault,
 			}
 			kernelItem, err := kernelAPI.KernelImport(cmd.Context(), importInput)
+			common.RecordResult(kernelItem)
 			if err != nil {
 				return err
 			}

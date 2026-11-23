@@ -1,7 +1,10 @@
 # ARP Cache Flush Before VM Spawn: Stale Entries Inflate SSH Timing
 
-**Status:** Active
+**Status:** Superseded for 0.3.0 by [ADR-0021](0021-exact-managed-neighbor-invalidation.md)
 **Date:** 2026-05-22
+
+> This record describes the former bridge-wide `ip neigh flush` design, not current 0.3.0 production code.
+> ADR-0021 retains the reused-IP goal with one typed, owner-bound neighbor invalidation.
 
 The project flushes the bridge ARP cache (`ip neigh flush dev <bridge>`) after creating the TAP device and before spawning Firecracker. Without this flush, a new VM that reuses an IP address from a recently-removed VM inherits the host's stale ARP entry pointing to the old (now-dead) TAP. SSH connections route to the dead interface, hit TCP SYN timeouts (~3s), and retry — inflating perceived boot time by 5-10s.
 

@@ -122,8 +122,9 @@ func (r *Resolver) ByNetworkIDBatch(ctx context.Context, networkIDs []string) (m
 		results[nid] = nil
 	}
 	for _, vm := range vms {
-		if _, ok := results[vm.NetworkID]; ok {
-			results[vm.NetworkID] = append(results[vm.NetworkID], vm)
+		networkID := string(vm.NetworkID)
+		if _, ok := results[networkID]; ok {
+			results[networkID] = append(results[networkID], vm)
 		}
 	}
 	return results, nil

@@ -21,6 +21,18 @@ func NewImageRepo() *ImageRepo {
 	return &ImageRepo{images: make(map[string]*model.ImageItem)}
 }
 
+func (r *ImageRepo) SaveImported(_ context.Context, img *model.ImageItem) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, exists := r.images[img.ID]
+	r.images[img.ID] = img
+	return !exists, nil
+}
+
+func (r *ImageRepo) SavePulled(ctx context.Context, img *model.ImageItem) (bool, error) {
+	return r.SaveImported(ctx, img)
+}
+
 // isNotDeleted returns true if the image is NOT soft-deleted.
 func (r *ImageRepo) isNotDeleted(img *model.ImageItem) bool {
 	return img.DeletedAt == nil && img.IsPresent

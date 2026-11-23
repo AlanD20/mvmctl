@@ -47,6 +47,8 @@ type Repository interface {
 	// Mutations
 	Upsert(ctx context.Context, vm *model.VMItem) error
 	UpdateStatus(ctx context.Context, id string, status model.VMStatus) error
+	// UpdateRuntimeStatuses atomically projects a complete authoritative batch.
+	UpdateRuntimeStatuses(ctx context.Context, updates []model.VMRuntimeStatusUpdate) error
 	// nil pid clears the PID field.
 	UpdatePID(ctx context.Context, id string, pid *int) error
 	UpdateProcessInfo(ctx context.Context, id string, pid *int, processStartTime *int64) error

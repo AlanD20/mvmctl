@@ -1,13 +1,17 @@
 #!/bin/bash
-set -e
-
-if [ ! -f /etc/kubernetes/admin.conf ]; then
-  echo "controller-1 not initialized"
-  exit 1
-fi
-
+set -euo pipefail
+umask 077
 export KUBECONFIG=/etc/kubernetes/admin.conf
-CERT_KEY=$(kubeadm init phase upload-certs --upload-certs 2>&1 | grep -A1 'certificate key' | tail -1 | xargs)
-kubeadm token create --print-join-command | sed 's/$/ --control-plane --certificate-key '"$CERT_KEY"'/' > /srv/k8s/join-controller
-
-echo "controller token updated"
+test -s "$KUBECONFIG"
+# Supply a known key to upload-certs, and publish it only after upload succeeds.
+key=$(openssl rand -hex 32)
+[[ $key =~ ^[0-9a-f]{64}$ ]]
+kubeadm init phase upload-certs --upload-certs --certificate-key "$key" >/dev/null
+file=$(mktemp /srv/k8s/.join-controller.XXXXXX)
+trap 'rm -f "$file"' EXIT
+join=$(kubeadm token create --ttl 2h --print-join-command)
+test -n "$join"
+printf '%s --control-plane --certificate-key %s\n' "$join" "$key" > "$file"
+chown root:controller-reader "$file"
+chmod 0640 "$file"
+mv "$file" /srv/k8s/join-controller

@@ -66,18 +66,22 @@ func ValidModes() []model.CloudInitMode {
 	}
 }
 
-// validateTemplateData checks all required TemplateData fields are non-empty.
-// If any required field is empty, it returns an error with the field name.
-func validateTemplateData(data TemplateData) error {
-	required := []struct {
+// validateTemplateData requires endpoint fields only when a network config is rendered.
+func validateTemplateData(data TemplateData, requireNetwork bool) error {
+	type requiredField struct {
 		name  string
 		value string
-	}{
+	}
+	required := []requiredField{
 		{"VMName", data.VMName},
 		{"User", data.User},
-		{"GuestIP", data.GuestIP},
-		{"IPv4Gateway", data.IPv4Gateway},
 		{"PasswordHash", data.PasswordHash},
+	}
+	if requireNetwork {
+		required = append(required,
+			requiredField{"GuestIP", data.GuestIP},
+			requiredField{"IPv4Gateway", data.IPv4Gateway},
+		)
 	}
 	for _, r := range required {
 		if r.value == "" {

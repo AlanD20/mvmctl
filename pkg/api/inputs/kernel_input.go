@@ -36,7 +36,7 @@ func (i *KernelInput) Resolve(ctx context.Context, repo kernel.Repository) ([]*m
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
-	resolver := kernel.NewResolver(repo, nil)
+	resolver := kernel.NewResolver(repo)
 	result := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if len(result.Items) == 0 {
 		return nil, errs.NotFound(errs.CodeKernelNotFound, "No kernels found matching identifiers")

@@ -1,21 +1,24 @@
 package vsock
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"strconv"
 	"time"
 
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
 // --- Constants ---
 
 const (
-	constConnectTimeout = 5 * time.Second
+	constConnectTimeout         = 5 * time.Second
+	maxConnectResponseLineBytes = 14 // "OK " + ten decimal uint32 digits + newline.
 )
 
 // --- File transfer protocol constants ---
@@ -32,25 +35,23 @@ const (
 
 // execRequest is the JSON frame sent from host to guest agent.
 type execRequest struct {
-	ID      string            `json:"id"`
-	Type    string            `json:"type"` // "exec", "exec-tty", "ping", "resize"
-	Command string            `json:"command,omitempty"`
-	Token   string            `json:"token,omitempty"`
-	Timeout int               `json:"timeout,omitempty"`
-	User    string            `json:"user,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	NoSync  bool              `json:"no_sync,omitempty"`
-	Rows    int               `json:"rows,omitempty"`
-	Cols    int               `json:"cols,omitempty"`
+	ID              string            `json:"id"`
+	Type            string            `json:"type"` // "exec", "exec-tty", "ping", "resize"
+	Command         string            `json:"command,omitempty"`
+	Token           string            `json:"token,omitempty"`
+	Timeout         int               `json:"timeout,omitempty"`
+	User            string            `json:"user,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	NoSync          bool              `json:"no_sync,omitempty"`
+	Rows            int               `json:"rows,omitempty"`
+	Cols            int               `json:"cols,omitempty"`
+	SourceSessionID string            `json:"source_session_id,omitempty"`
 }
-
-// ResponseTypeRemoteVM is the frame type for guest-initiated remote VM execution requests.
-const ResponseTypeRemoteVM = "remote_vm"
 
 // execResponse is the JSON frame received from the guest agent.
 type execResponse struct {
 	ID         string `json:"id"`
-	Type       string `json:"type"` // "result", "tty", "pong", "stdout", "stderr", "remote_vm"
+	Type       string `json:"type"` // "result", "tty", "pong", "stdout", "stderr"
 	Status     int    `json:"status,omitempty"`
 	Data       string `json:"data,omitempty"`
 	Stdout     string `json:"stdout,omitempty"`
@@ -61,23 +62,33 @@ type execResponse struct {
 
 // --- UDS dial and CONNECT handshake ---
 
-// dialAndHandshake connects to the Firecracker vsock UDS and performs the
-// CONNECT handshake. Returns an open connection on success.
-func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum int) (net.Conn, error) {
+// dialAndHandshake obtains the VM's authenticated private UDS connection and performs guest CONNECT.
+func dialAndHandshake(ctx context.Context, vmID string, port int, attemptNum int) (net.Conn, error) {
 	slog.Debug("vsock dial attempt",
-		"uds_path", udsPath,
+		"vm_id", vmID,
 		"port", port,
 		"attempt", attemptNum,
 	)
 
-	d := net.Dialer{Timeout: constConnectTimeout}
-	conn, err := d.DialContext(ctx, "unix", udsPath)
+	conn, err := jailer.NewHostVsockClient().Open(ctx, vmID)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeVsockConnectionFailed, err)
 	}
+	return connectGuest(ctx, conn, vmID, port, attemptNum)
+}
 
-	// Send CONNECT <port>\n
-	_, err = fmt.Fprintf(conn, "CONNECT %d\n", port)
+// connectGuest performs the guest CONNECT protocol on an admitted host-vsock connection.
+func connectGuest(ctx context.Context, conn net.Conn, vmID string, port int, attemptNum int) (net.Conn, error) {
+	deadline := time.Now().Add(constConnectTimeout)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		conn.Close()
+		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed, "set CONNECT deadline", err)
+	}
+	// The unprivileged caller alone selects the guest port and later supplies its agent token.
+	_, err := fmt.Fprintf(conn, "CONNECT %d\n", port)
 	if err != nil {
 		conn.Close()
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
@@ -86,7 +97,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 
 	// Set per-attempt read timeout to prevent blocking on a half-open
 	// connection (Firecracker accepts UDS connect but never responds).
-	if err := conn.SetReadDeadline(time.Now().Add(constConnectTimeout)); err != nil {
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		conn.Close()
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
 			"failed to set read deadline", err)
@@ -100,7 +111,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 	}
 	resCh := make(chan readResult, 1)
 	go func() {
-		resp, err := bufio.NewReader(conn).ReadString('\n')
+		resp, err := readConnectResponseLine(conn)
 		resCh <- readResult{resp, err}
 	}()
 
@@ -109,7 +120,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 		if res.err != nil {
 			conn.Close()
 			slog.Debug("vsock handshake read failed",
-				"uds_path", udsPath,
+				"vm_id", vmID,
 				"port", port,
 				"attempt", attemptNum,
 				"error", res.err,
@@ -120,7 +131,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 		// Firecracker acknowledges with "OK <assigned_hostside_port>\n" where
 		// the host-side port is dynamically assigned, NOT the requested port.
 		// See https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md
-		if len(res.resp) < 3 || res.resp[:3] != "OK " {
+		if !validConnectResponse(res.resp) {
 			conn.Close()
 			// Build safe error message (avoid panic on empty/short response).
 			got := res.resp
@@ -128,7 +139,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 				got = got[:len(got)-1]
 			}
 			slog.Debug("vsock handshake failed",
-				"uds_path", udsPath,
+				"vm_id", vmID,
 				"port", port,
 				"attempt", attemptNum,
 				"response", got,
@@ -137,9 +148,9 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 				fmt.Sprintf("handshake failed: got %q, expected \"OK ...\"", got))
 		}
 		// Clear read deadline so the caller's own deadline governs later reads.
-		_ = conn.SetReadDeadline(time.Time{})
+		_ = conn.SetDeadline(time.Time{}) // The ordinary command/copy context owns the later lifetime.
 		slog.Debug("vsock handshake succeeded",
-			"uds_path", udsPath,
+			"vm_id", vmID,
 			"port", port,
 			"attempt", attemptNum,
 			"response", trimTrailingNewline(res.resp),
@@ -151,6 +162,35 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum 
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
 			"handshake cancelled by context", ctx.Err())
 	}
+}
+
+// readConnectResponseLine reads only the ACK bytes, preserving any immediately following guest data.
+func readConnectResponseLine(conn net.Conn) (string, error) {
+	var response [maxConnectResponseLineBytes]byte
+	for i := range response {
+		if _, err := io.ReadFull(conn, response[i:i+1]); err != nil {
+			return "", err
+		}
+		if response[i] == '\n' {
+			return string(response[:i+1]), nil
+		}
+	}
+	return "", fmt.Errorf("CONNECT response exceeds %d bytes", maxConnectResponseLineBytes)
+}
+
+func validConnectResponse(response string) bool {
+	if len(response) < 5 || len(response) > maxConnectResponseLineBytes ||
+		response[:3] != "OK " || response[len(response)-1] != '\n' {
+		return false
+	}
+	port := response[3 : len(response)-1]
+	for i := range port {
+		if port[i] < '0' || port[i] > '9' {
+			return false
+		}
+	}
+	_, err := strconv.ParseUint(port, 10, 32)
+	return err == nil
 }
 
 // trimTrailingNewline removes a single trailing newline from s.
@@ -188,8 +228,8 @@ func readFrameRaw(conn net.Conn, v any) error {
 	return json.NewDecoder(conn).Decode(v)
 }
 
-// DialVM connects to a VM's vsock via UDS + CONNECT handshake.
+// DialVM connects to an exact VM's private vsock through root peer admission and guest CONNECT.
 // Returns an open connection that is ready to send/receive JSON frames.
-func DialVM(ctx context.Context, udsPath string, port int) (net.Conn, error) {
-	return dialAndHandshake(ctx, udsPath, port, 1)
+func DialVM(ctx context.Context, vmID string, port int) (net.Conn, error) {
+	return dialAndHandshake(ctx, vmID, port, 1)
 }

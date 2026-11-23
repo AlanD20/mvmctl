@@ -1,0 +1,586 @@
+package jailer
+
+import (
+	"context"
+	"errors"
+
+	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/infra"
+	"mvmctl/pkg/errs"
+)
+
+const (
+	managedVMRootfsMinBytes    uint64 = 128 << 20
+	managedVMRootfsMaxBytes    uint64 = 16 << 40
+	managedVMConfigMinBytes    uint64 = 1
+	managedVMConfigMaxBytes    uint64 = 1 << 20
+	managedVMKernelMinBytes    uint64 = 1
+	managedVMKernelMaxBytes    uint64 = 1 << 30
+	managedVMCloudInitMinBytes uint64 = 1
+	managedVMCloudInitMaxBytes uint64 = 256 << 20
+
+	managedVMResourceDirectoryOpenFlags = unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	managedVMResourceFileOpenFlags      = unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	managedVMConfigOpenFlags            = unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	managedVMResourceResolveFlags       = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS |
+		unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
+	managedVMResourceStatxFlags = unix.AT_EMPTY_PATH | unix.AT_NO_AUTOMOUNT | unix.AT_SYMLINK_NOFOLLOW |
+		unix.AT_STATX_FORCE_SYNC
+	managedVMResourceRequiredDirectoryStat = unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_INO
+	managedVMResourceRequiredFileStat      = managedVMResourceRequiredDirectoryStat | unix.STATX_NLINK |
+		unix.STATX_SIZE
+	managedVMResourceStatxMask = unix.STATX_BASIC_STATS
+)
+
+type vmResourceID string
+
+type kernelResourceID string
+
+type cloudInitPresence uint8
+
+const (
+	cloudInitAbsent cloudInitPresence = iota + 1
+	cloudInitPresent
+)
+
+type vmLaunchResourceSpec struct {
+	vmID                vmResourceID
+	kernelID            kernelResourceID
+	expectedRootfsBytes uint64
+	firecracker         vmFirecrackerLaunchIntent
+}
+
+type vmLaunchResourceLease struct {
+	deps              managedCacheDeps
+	vmID              vmResourceID
+	kernelID          kernelResourceID
+	cacheIdentity     managedCacheIdentity
+	ownerUID          uint32
+	rootfsFD          int
+	kernelFD          int
+	cloudInitFD       int
+	preparedConfig    *preparedFirecrackerConfig
+	protectedBackings *isolatedLaunchBackings
+	restoredSnapshot  *preparedSnapshotRestore
+	volumes           []pinnedVMVolumeResource
+	deviceProfile     *vmFirecrackerDeviceProfile
+	pciEnabled        bool
+	nestedVirt        bool
+	retained          []int
+}
+
+type managedVMRegularFilePolicy struct {
+	name              string
+	minimumBytes      uint64
+	maximumBytes      uint64
+	exactBytes        uint64
+	requiredOwnerMode uint16
+	allowExecute      bool
+}
+
+func newVMLaunchResourceSpec(
+	vmID string,
+	kernelID string,
+	expectedRootfsBytes uint64,
+	firecracker vmFirecrackerLaunchIntent,
+) (vmLaunchResourceSpec, error) {
+	spec := vmLaunchResourceSpec{
+		vmID:                vmResourceID(vmID),
+		kernelID:            kernelResourceID(kernelID),
+		expectedRootfsBytes: expectedRootfsBytes,
+		firecracker:         cloneVMFirecrackerLaunchIntent(firecracker),
+	}
+	if err := validateVMLaunchResourceSpec(spec); err != nil {
+		return vmLaunchResourceSpec{}, err
+	}
+	return spec, nil
+}
+
+func validateVMLaunchResourceSpec(spec vmLaunchResourceSpec) error {
+	if !isCanonicalManagedResourceID(string(spec.vmID), 32) {
+		return managedVMResourceValidationError(
+			"managed VM ID must be 32 lowercase hexadecimal characters",
+		)
+	}
+	if !isCanonicalManagedResourceID(string(spec.kernelID), 64) {
+		return managedVMResourceValidationError(
+			"managed kernel ID must be 64 lowercase hexadecimal characters",
+		)
+	}
+	if spec.expectedRootfsBytes < managedVMRootfsMinBytes ||
+		spec.expectedRootfsBytes > managedVMRootfsMaxBytes {
+		return managedVMResourceValidationError("managed VM rootfs size is outside the supported range")
+	}
+	return validateVMFirecrackerLaunchIntent(spec.firecracker)
+}
+
+func (cache *managedCacheLease) pinVMLaunchResources(
+	ctx context.Context,
+	spec vmLaunchResourceSpec,
+) (_ *vmLaunchResourceLease, returnErr error) {
+	return nil, managedVMResourceValidationError("launch requires isolated protected backing authority")
+}
+
+func (cache *managedCacheLease) pinIsolatedVMLaunchResources(
+	ctx context.Context,
+	spec vmLaunchResourceSpec,
+	backings *isolatedLaunchBackings,
+) (_ *vmLaunchResourceLease, returnErr error) {
+	if backings == nil || backings.rootfs == nil {
+		return nil, managedVMResourceValidationError("protected rootfs authority is absent")
+	}
+	if err := validateActiveManagedCacheLease(cache); err != nil {
+		return nil, err
+	}
+	if err := validateVMLaunchResourceSpec(spec); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, managedVMResourceAtomicError("pin managed VM launch resources", err)
+	}
+
+	openedBeforeConfig := make([]int, 0, 3)
+	openedAfterConfig := make([]int, 0, 3)
+	configSourceFD := -1
+	var preparedConfig *preparedFirecrackerConfig
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		if preparedConfig != nil {
+			returnErr = appendManagedVMResourceCleanupError(
+				returnErr,
+				"release rejected sealed Firecracker configuration",
+				preparedConfig.Release(context.WithoutCancel(ctx)),
+			)
+		}
+		if closeErr := closeManagedCacheFDs(ctx, cache.deps, openedAfterConfig); closeErr != nil {
+			returnErr = appendManagedVMResourceCleanupError(
+				returnErr,
+				"close rejected later managed VM launch resources",
+				closeErr,
+			)
+		}
+		if configSourceFD >= 0 {
+			returnErr = appendManagedVMResourceCleanupError(
+				returnErr,
+				"close rejected managed Firecracker configuration source",
+				cache.configDeps.close(context.WithoutCancel(ctx), configSourceFD),
+			)
+		}
+		if closeErr := closeManagedCacheFDs(ctx, cache.deps, openedBeforeConfig); closeErr != nil {
+			returnErr = appendManagedVMResourceCleanupError(
+				returnErr,
+				"close rejected earlier managed VM launch resources",
+				closeErr,
+			)
+		}
+	}()
+
+	vmsFD, err := openManagedVMResourceDirectory(ctx, cache.deps, cache.cacheFD, "vms", "VM store", cache.ownerUID)
+	if err != nil {
+		return nil, err
+	}
+	openedBeforeConfig = append(openedBeforeConfig, vmsFD)
+	vmFD, err := openManagedVMResourceDirectory(
+		ctx,
+		cache.deps,
+		vmsFD,
+		string(spec.vmID),
+		"VM directory",
+		cache.ownerUID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	openedBeforeConfig = append(openedBeforeConfig, vmFD)
+
+	rootfsFD := backings.rootfs.fd
+	rootBinding, err := backings.rootfs.Binding(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rootBinding.kind != protectedBackingRootfs || rootBinding.logicalID != string(spec.vmID) ||
+		rootBinding.bytes != spec.expectedRootfsBytes ||
+		rootBinding.ownerUID != cache.ownerUID ||
+		rootBinding.cacheIdentity != cache.identity {
+		return nil, managedVMResourceValidationError("protected rootfs does not match launch selection")
+	}
+	configFD, err := openManagedVMResourceFileWithFlags(
+		ctx,
+		cache.deps,
+		vmFD,
+		infra.VMFirecrackerConfigFilename,
+		managedVMConfigOpenFlags,
+		managedVMRegularFilePolicy{
+			name:              "Firecracker configuration",
+			minimumBytes:      managedVMConfigMinBytes,
+			maximumBytes:      managedVMConfigMaxBytes,
+			requiredOwnerMode: 0400,
+		},
+		cache.ownerUID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	configSourceFD = configFD
+
+	cloudInitFD := -1
+	if spec.firecracker.cloudInit == cloudInitPresent {
+		if backings.cloudInit == nil {
+			return nil, managedVMResourceValidationError("protected cloud-init authority is absent")
+		}
+		cloudInitFD = backings.cloudInit.fd
+	}
+	if backings.kernel == nil {
+		return nil, managedVMResourceValidationError("protected kernel authority is absent")
+	}
+	kernelFD := backings.kernel.fd
+	volumes := make([]pinnedVMVolumeResource, 0, len(spec.firecracker.volumes))
+	for _, volume := range spec.firecracker.volumes {
+		backing := backings.volumes[volume.id]
+		if backing == nil {
+			return nil, managedVMResourceValidationError("protected volume selection is incomplete")
+		}
+		binding, err := backing.Binding(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if binding.kind != protectedBackingVolume || binding.logicalID != string(volume.id) ||
+			binding.bytes != volume.expectedBytes ||
+			binding.ownerUID != cache.ownerUID ||
+			binding.cacheIdentity != cache.identity {
+			return nil, managedVMResourceValidationError("protected volume binding differs from launch selection")
+		}
+		volumes = append(volumes, pinnedVMVolumeResource{spec: volume, fd: backing.fd, identity: binding.identity})
+	}
+
+	consumedConfigFD := configSourceFD
+	configSourceFD = -1
+	preparedConfig, err = prepareManagedFirecrackerConfig(
+		ctx,
+		cache.configDeps,
+		consumedConfigFD,
+		spec.firecracker,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	retained := make([]int, 0, len(cache.retained)+len(openedBeforeConfig)+len(openedAfterConfig))
+	retained = append(retained, cache.retained...)
+	retained = append(retained, openedBeforeConfig...)
+	retained = append(retained, openedAfterConfig...)
+	lease := &vmLaunchResourceLease{
+		vmID:              spec.vmID,
+		kernelID:          spec.kernelID,
+		deps:              cache.deps,
+		cacheIdentity:     cache.identity,
+		ownerUID:          cache.ownerUID,
+		rootfsFD:          rootfsFD,
+		kernelFD:          kernelFD,
+		cloudInitFD:       cloudInitFD,
+		preparedConfig:    preparedConfig,
+		protectedBackings: backings,
+		volumes:           volumes,
+		deviceProfile:     spec.firecracker.deviceProfile,
+		pciEnabled:        spec.firecracker.pciEnabled,
+		nestedVirt:        spec.firecracker.nestedVirt,
+		retained:          retained,
+	}
+	cache.retained = nil
+	cache.cacheFD = -1
+	cache.ownerUID = 0
+	cache.identity = managedCacheIdentity{}
+	cache.configDeps = managedFirecrackerConfigDeps{}
+	openedBeforeConfig = nil
+	openedAfterConfig = nil
+	preparedConfig = nil
+	return lease, nil
+}
+
+func validateActiveManagedCacheLease(cache *managedCacheLease) error {
+	if cache == nil || cache.cacheFD < 0 || cache.ownerUID == 0 || len(cache.retained) == 0 ||
+		cache.deps.openAt2 == nil || cache.deps.statx == nil || cache.deps.close == nil ||
+		cache.configDeps.close == nil {
+		return managedVMResourceAtomicError("managed cache lease is not active", nil)
+	}
+	return nil
+}
+
+func openManagedVMResourceDirectory(
+	ctx context.Context,
+	deps managedCacheDeps,
+	parentFD int,
+	component string,
+	name string,
+	ownerUID uint32,
+) (int, error) {
+	fd, err := openManagedVMResourceComponent(ctx, deps, parentFD, component, managedVMResourceDirectoryOpenFlags, name)
+	if err != nil {
+		return -1, err
+	}
+	if err := inspectManagedVMResourceDirectory(ctx, deps, fd, name, ownerUID); err != nil {
+		if closeErr := deps.close(context.WithoutCancel(ctx), fd); closeErr != nil {
+			err = appendManagedVMResourceCleanupError(err, "close rejected managed VM directory", closeErr)
+		}
+		return -1, err
+	}
+	return fd, nil
+}
+
+func openManagedVMResourceFile(
+	ctx context.Context,
+	deps managedCacheDeps,
+	parentFD int,
+	component string,
+	policy managedVMRegularFilePolicy,
+	ownerUID uint32,
+) (int, error) {
+	return openManagedVMResourceFileWithFlags(
+		ctx,
+		deps,
+		parentFD,
+		component,
+		managedVMResourceFileOpenFlags,
+		policy,
+		ownerUID,
+	)
+}
+
+func openManagedVMResourceFileWithFlags(
+	ctx context.Context,
+	deps managedCacheDeps,
+	parentFD int,
+	component string,
+	flags int,
+	policy managedVMRegularFilePolicy,
+	ownerUID uint32,
+) (int, error) {
+	fd, err := openManagedVMResourceComponent(
+		ctx,
+		deps,
+		parentFD,
+		component,
+		flags,
+		policy.name,
+	)
+	if err != nil {
+		return -1, err
+	}
+	if err := inspectManagedVMResourceFile(ctx, deps, fd, policy, ownerUID); err != nil {
+		if closeErr := deps.close(context.WithoutCancel(ctx), fd); closeErr != nil {
+			err = appendManagedVMResourceCleanupError(err, "close rejected managed VM file", closeErr)
+		}
+		return -1, err
+	}
+	return fd, nil
+}
+
+func openManagedVMResourceComponent(
+	ctx context.Context,
+	deps managedCacheDeps,
+	parentFD int,
+	component string,
+	flags int,
+	name string,
+) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return -1, managedVMResourceAtomicError("open managed "+name, err)
+	}
+	how := unix.OpenHow{Flags: uint64(flags), Resolve: uint64(managedVMResourceResolveFlags)}
+	fd, err := deps.openAt2(ctx, parentFD, component, &how)
+	if err != nil {
+		return -1, classifyManagedVMResourceOpenError(name, err)
+	}
+	return fd, nil
+}
+
+func inspectManagedVMResourceDirectory(
+	ctx context.Context,
+	deps managedCacheDeps,
+	fd int,
+	name string,
+	ownerUID uint32,
+) error {
+	stat, err := statManagedVMResource(ctx, deps, fd, name, managedVMResourceRequiredDirectoryStat)
+	if err != nil {
+		return err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return managedVMResourceValidationError("managed " + name + " is not a directory")
+	}
+	if stat.Uid != ownerUID {
+		return managedVMResourceValidationError("managed " + name + " is not owned by the invoking user")
+	}
+	if stat.Mode&0700 != 0700 {
+		return managedVMResourceValidationError("managed " + name + " must grant owner read, write, and traversal")
+	}
+	if stat.Mode&0022 != 0 {
+		return managedVMResourceValidationError("managed " + name + " is writable by another user")
+	}
+	if stat.Mode&(unix.S_ISUID|unix.S_ISGID|unix.S_ISVTX) != 0 {
+		return managedVMResourceValidationError("managed " + name + " has unsupported special mode bits")
+	}
+	return nil
+}
+
+func inspectManagedVMResourceFile(
+	ctx context.Context,
+	deps managedCacheDeps,
+	fd int,
+	policy managedVMRegularFilePolicy,
+	ownerUID uint32,
+) error {
+	stat, err := statManagedVMResource(ctx, deps, fd, policy.name, managedVMResourceRequiredFileStat)
+	if err != nil {
+		return err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return managedVMResourceValidationError("managed " + policy.name + " is not a regular file")
+	}
+	if stat.Uid != ownerUID {
+		return managedVMResourceValidationError("managed " + policy.name + " is not owned by the invoking user")
+	}
+	if stat.Nlink != 1 {
+		return managedVMResourceValidationError("managed " + policy.name + " must have exactly one link")
+	}
+	if stat.Mode&policy.requiredOwnerMode != policy.requiredOwnerMode {
+		return managedVMResourceValidationError("managed " + policy.name + " does not grant required owner access")
+	}
+	if stat.Mode&0022 != 0 {
+		return managedVMResourceValidationError("managed " + policy.name + " is writable by another user")
+	}
+	if stat.Mode&(unix.S_ISUID|unix.S_ISGID|unix.S_ISVTX) != 0 {
+		return managedVMResourceValidationError("managed " + policy.name + " has unsupported special mode bits")
+	}
+	if !policy.allowExecute && stat.Mode&0111 != 0 {
+		return managedVMResourceValidationError("managed " + policy.name + " has unsupported execute access")
+	}
+	if stat.Size < policy.minimumBytes || stat.Size > policy.maximumBytes {
+		return managedVMResourceValidationError("managed " + policy.name + " size is outside the supported range")
+	}
+	if policy.exactBytes != 0 && stat.Size != policy.exactBytes {
+		return managedVMResourceValidationError("managed " + policy.name + " size does not match the expected size")
+	}
+	return nil
+}
+
+func statManagedVMResource(
+	ctx context.Context,
+	deps managedCacheDeps,
+	fd int,
+	name string,
+	requiredMask uint32,
+) (unix.Statx_t, error) {
+	if err := ctx.Err(); err != nil {
+		return unix.Statx_t{}, managedVMResourceAtomicError("inspect managed "+name, err)
+	}
+	var stat unix.Statx_t
+	if err := deps.statx(ctx, fd, managedVMResourceStatxFlags, managedVMResourceStatxMask, &stat); err != nil {
+		return unix.Statx_t{}, managedVMResourceAtomicError("inspect managed "+name, err)
+	}
+	if stat.Mask&requiredMask != requiredMask || stat.Ino == 0 || (stat.Dev_major == 0 && stat.Dev_minor == 0) {
+		return unix.Statx_t{}, managedVMResourceValidationError("managed " + name + " has incomplete stable metadata")
+	}
+	if stat.Attributes_mask&unix.STATX_ATTR_AUTOMOUNT != 0 && stat.Attributes&unix.STATX_ATTR_AUTOMOUNT != 0 {
+		return unix.Statx_t{}, managedVMResourceValidationError(
+			"managed " + name + " uses unsupported automount topology",
+		)
+	}
+	return stat, nil
+}
+
+func classifyManagedVMResourceOpenError(name string, cause error) error {
+	message := "open managed " + name
+	if errors.Is(cause, unix.ELOOP) || errors.Is(cause, unix.ENOTDIR) || errors.Is(cause, unix.EXDEV) ||
+		errors.Is(cause, unix.ENOENT) || errors.Is(cause, unix.EACCES) {
+		return errs.WrapMsg(errs.CodeValidationFailed, message, cause)
+	}
+	return managedVMResourceAtomicError(message, cause)
+}
+
+func (lease *vmLaunchResourceLease) Release(ctx context.Context) error {
+	if lease == nil || (len(lease.retained) == 0 && lease.preparedConfig == nil) {
+		return nil
+	}
+	var result error
+	if lease.protectedBackings != nil {
+		result = lease.protectedBackings.Release(context.WithoutCancel(ctx))
+		lease.protectedBackings = nil
+	}
+	if lease.preparedConfig != nil {
+		result = errors.Join(result, lease.preparedConfig.Release(context.WithoutCancel(ctx)))
+	}
+	if closeErr := closeManagedCacheFDs(ctx, lease.deps, lease.retained); closeErr != nil {
+		result = appendManagedVMResourceCleanupError(
+			result,
+			"release managed VM launch resource descriptors",
+			closeErr,
+		)
+	}
+	lease.retained = nil
+	lease.cacheIdentity = managedCacheIdentity{}
+	lease.ownerUID = 0
+	lease.rootfsFD = -1
+	lease.kernelFD = -1
+	lease.cloudInitFD = -1
+	lease.preparedConfig = nil
+	lease.volumes = nil
+	lease.deviceProfile = nil
+	lease.pciEnabled = false
+	lease.nestedVirt = false
+	if result != nil {
+		return result
+	}
+	return nil
+}
+
+func appendManagedVMResourceCleanupError(primary error, message string, cause error) error {
+	if cause == nil {
+		return primary
+	}
+	if primary == nil {
+		return managedVMResourceCleanupError(message, cause)
+	}
+	if domainErr := errs.AsDomainError(primary); domainErr != nil {
+		domainErr.Message += "; " + message + ": " + cause.Error()
+		domainErr.Err = errors.Join(domainErr.Err, cause)
+		if domainErr.Details == nil {
+			domainErr.Details = make(map[string]any)
+		}
+		domainErr.Details["managed_vm_resource_descriptor_cleanup_failed"] = true
+		return domainErr
+	}
+	return managedVMResourceCleanupError(message+": "+cause.Error(), errors.Join(primary, cause))
+}
+
+func managedVMResourceAtomicError(message string, cause error) *errs.DomainError {
+	if cause == nil {
+		return errs.New(errs.CodeVMAtomicFailed, message, errs.WithClass(errs.ClassInternal))
+	}
+	return errs.WrapMsg(errs.CodeVMAtomicFailed, message, cause, errs.WithClass(errs.ClassInternal))
+}
+
+func managedVMResourceCleanupError(message string, cause error) *errs.DomainError {
+	domainErr := managedVMResourceAtomicError(message, cause)
+	domainErr.Details = map[string]any{"managed_vm_resource_descriptor_cleanup_failed": true}
+	return domainErr
+}
+
+func isCanonicalManagedResourceID(value string, length int) bool {
+	if len(value) != length {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if (value[index] < '0' || value[index] > '9') && (value[index] < 'a' || value[index] > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func managedVMResourceValidationError(message string) *errs.DomainError {
+	return errs.New(errs.CodeValidationFailed, message)
+}

@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,11 @@ func TestNewVMCmd(t *testing.T) {
 		})
 	}
 
+	createCmd, _, err := cmd.Find([]string{"create"})
+	require.NoError(t, err)
+	assert.Nil(t, createCmd.Flags().Lookup("allow-remote-exec"))
+	assert.Nil(t, createCmd.Flags().Lookup("deny-remote-exec"))
+
 	t.Run("no_extra_subcommands", func(t *testing.T) {
 		expected := make(map[string]bool)
 		for _, sc := range expectedSubcommands {
@@ -81,8 +87,8 @@ func TestNewVMCmd(t *testing.T) {
 func TestRunVMList(t *testing.T) {
 	t.Run("empty_list_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
-				return nil
+			VMListFunc: func(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
+				return nil, nil
 			},
 		}
 		cmd := cli.NewVMCmd(mock, nil)
@@ -93,11 +99,11 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("single_vm_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
+			VMListFunc: func(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
 				return []*model.VMItem{{
 					ID: "vm-1", Name: "test-vm",
 					Status: model.VMStatusRunning,
-				}}
+				}}, nil
 			},
 		}
 		cmd := cli.NewVMCmd(mock, nil)
@@ -112,8 +118,8 @@ func TestRunVMList(t *testing.T) {
 			{ID: "vm-2", Name: "vm-two", Status: model.VMStatusStopped},
 		}
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
-				return vms
+			VMListFunc: func(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
+				return vms, nil
 			},
 		}
 		cmd := cli.NewVMCmd(mock, nil)
@@ -124,10 +130,10 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("json_output_with_vms_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
+			VMListFunc: func(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
 				return []*model.VMItem{
 					{ID: "vm-1", Name: "vm-one", Status: model.VMStatusRunning},
-				}
+				}, nil
 			},
 		}
 		cmd := cli.NewVMCmd(mock, nil)
@@ -139,8 +145,8 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("json_output_with_nil_vms_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
-				return nil
+			VMListFunc: func(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
+				return nil, nil
 			},
 		}
 		cmd := cli.NewVMCmd(mock, nil)
@@ -152,8 +158,8 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("long_output_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
-				return nil
+			VMListFunc: func(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
+				return nil, nil
 			},
 		}
 		cmd := cli.NewVMCmd(mock, nil)
@@ -168,11 +174,11 @@ func TestRunVMList(t *testing.T) {
 		cancel()
 		cancelled := false
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
+			VMListFunc: func(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
 				if ctx.Err() != nil {
 					cancelled = true
 				}
-				return nil
+				return nil, nil
 			},
 		}
 		cmd := cli.NewVMCmd(mock, nil)
@@ -181,6 +187,19 @@ func TestRunVMList(t *testing.T) {
 		err := listCmd.RunE(listCmd, []string{})
 		assert.NoError(t, err, "vm ls should not error on cancelled context — list is read-only")
 		assert.True(t, cancelled, "mock VMListFunc should have received the cancelled context")
+	})
+
+	t.Run("list_error_propagates", func(t *testing.T) {
+		listErr := errors.New("runtime status unavailable")
+		mock := &testutil.MockVMAPI{
+			VMListFunc: func(context.Context, ...string) ([]*model.VMItem, error) {
+				return nil, listErr
+			},
+		}
+		cmd := cli.NewVMCmd(mock, nil)
+		listCmd, _, err := cmd.Find([]string{"ls"})
+		require.NoError(t, err)
+		assert.ErrorIs(t, listCmd.RunE(listCmd, nil), listErr)
 	})
 }
 

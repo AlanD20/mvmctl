@@ -2,11 +2,11 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -38,11 +38,7 @@ func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
 		slog.Debug("IP forwarding already enabled")
 		return nil, nil
 	}
-	_, err = system.DefaultRunner.Run(
-		ctx,
-		[]string{"sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)},
-		system.RunCmdOpts{Check: true, Capture: true},
-	)
+	err = runAdministratorCommand(ctx, []string{"/usr/sbin/sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to enable IP forwarding: %w", err)
 	}
@@ -111,7 +107,10 @@ func (s *Service) loadModule(
 	changeOrder int,
 	initTimestamp, createdAt string,
 ) (*model.HostStateChangeItem, error) {
-	_, err := system.DefaultRunner.Run(ctx, []string{"modprobe", module}, system.RunCmdOpts{Check: true, Capture: true})
+	if module != "kvm" && module != "kvm_intel" && module != "kvm_amd" {
+		return nil, errs.New(errs.CodeValidationFailed, "unsupported KVM module")
+	}
+	err := runAdministratorCommand(ctx, []string{"/usr/sbin/modprobe", module})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kernel module %s: %w", module, err)
 	}
@@ -149,10 +148,22 @@ func (s *Service) EnsureKVMModules(
 
 	// Detect available vendor modules: check lsmod first, then modprobe --dry-run
 	var vendorModules []string
-	for _, mod := range []string{"kvm_intel", "kvm_amd"} {
-		loaded := isModuleLoaded(ctx, mod)
-		dryRunResult, _ := system.DefaultRunner.Run(ctx, []string{"modprobe", "--dry-run", mod},
-			system.RunCmdOpts{Check: false})
+	for index, mod := range []string{"kvm_intel", "kvm_amd"} {
+		loaded, err := administratorModuleLoaded(ctx, mod)
+		if err != nil {
+			// A moduleless kernel has no inventory; admit only already-accessible built-in KVM.
+			if index == 0 && errors.Is(err, os.ErrNotExist) && ctx.Err() == nil && CheckKVMAccess() {
+				slog.Warn("KVM is accessible without a loadable module inventory")
+				return changes, nextOrder, nil
+			}
+			return nil, nextOrder, err
+		}
+		dryRunResult, err := system.DefaultRunner.Run(ctx, []string{"/usr/sbin/modprobe", "--dry-run", mod},
+			system.RunCmdOpts{Check: false, Capture: true, Timeout: 30 * time.Second,
+				MaxStdoutBytes: 4096, MaxStderrBytes: 4096})
+		if err != nil || dryRunResult == nil {
+			return nil, nextOrder, errs.WrapMsg(errs.CodeHostInitFailed, "inspect KVM module availability", err)
+		}
 		if loaded || dryRunResult.Success() {
 			vendorModules = append(vendorModules, mod)
 		}
@@ -173,7 +184,11 @@ func (s *Service) EnsureKVMModules(
 
 	kvmModules := []string{"kvm"}
 	for _, module := range kvmModules {
-		if isModuleLoaded(ctx, module) {
+		loaded, err := administratorModuleLoaded(ctx, module)
+		if err != nil {
+			return changes, nextOrder, err
+		}
+		if loaded {
 			slog.Debug("Module already loaded", "module", module)
 			continue
 		}
@@ -187,24 +202,51 @@ func (s *Service) EnsureKVMModules(
 
 	vendorLoaded := false
 	for _, m := range vendorModules {
-		if isModuleLoaded(ctx, m) {
+		loaded, err := administratorModuleLoaded(ctx, m)
+		if err != nil {
+			return changes, nextOrder, err
+		}
+		if loaded {
 			vendorLoaded = true
 			break
 		}
 	}
 	if !vendorLoaded {
+		var loadErr error
 		for _, module := range vendorModules {
 			change, err := s.loadModule(ctx, module, sessionID, nextOrder, now, now)
 			if err != nil {
+				loadErr = errors.Join(loadErr, err)
 				continue
 			}
 			changes = append(changes, change)
 			nextOrder++
+			vendorLoaded = true
 			break
+		}
+		if !vendorLoaded {
+			return changes, nextOrder, errs.WrapMsg(errs.CodeHostInitFailed, "load KVM vendor module", loadErr)
 		}
 	}
 
 	return changes, nextOrder, nil
+}
+
+func administratorModuleLoaded(ctx context.Context, module string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	data, err := os.ReadFile("/proc/modules")
+	if err != nil {
+		return false, err
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == module {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // --- DetectAndSaveCapacity ---
@@ -215,6 +257,11 @@ func (s *Service) DetectAndSaveCapacity(ctx context.Context) (*model.HostHardwar
 	}
 	limits := DetectLimits()
 	detectedAt := time.Now().Format(time.RFC3339)
+	// Administrator host init deliberately does not touch the caller's SQLite database.
+	// This row caches capacity only; it is never host-admission authority.
+	if _, err := s.repo.InitializeState(ctx); err != nil {
+		return nil, nil, err
+	}
 
 	err = s.repo.SaveCapacity(ctx,
 		hardware.Hostname,
@@ -254,142 +301,4 @@ func (s *Service) DetectAndSaveCapacity(ctx context.Context) (*model.HostHardwar
 		"memory_mib", hardware.MemoryTotalMiB,
 	)
 	return hardware, limits, nil
-}
-
-// --- RestoreState ---
-func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeItem, error) {
-	_, err := s.repo.InitializeState(ctx)
-	if err != nil {
-		return nil, err
-	}
-	changes, err := s.repo.ListChanges(ctx, nil, false)
-	if err != nil {
-		return nil, err
-	}
-	if len(changes) == 0 {
-		return nil, errs.New(
-			errs.CodeHostResetFailed,
-			"No saved host state to restore",
-			errs.WithClass(errs.ClassInternal),
-		)
-	}
-
-	var reverted []*model.HostStateChangeItem
-	revertedAt := time.Now().Format(time.RFC3339)
-
-	restorableSysctl := map[string]bool{sysctlKey: true}
-	restorableFiles := []string{
-		infra.SudoersDropInPath(),
-		fmt.Sprintf("%s/%s.conf", infra.DefaultSysctlConfDir, infra.ProjectName),
-	}
-	var resolvedAllowedFiles []string
-	for _, p := range restorableFiles {
-		resolvedAllowedFiles = append(resolvedAllowedFiles, system.ResolvePath(p))
-	}
-
-	for i := len(changes) - 1; i >= 0; i-- {
-		change := changes[i]
-		wasReverted := false
-
-		if change.Mechanism == "sysctl" && change.OriginalValue != nil {
-			if !restorableSysctl[change.Setting] {
-				slog.Debug("Skipping disallowed sysctl key from state", "key", change.Setting)
-				continue
-			}
-			_, err := system.DefaultRunner.Run(
-				ctx,
-				[]string{"sysctl", "-w", fmt.Sprintf("%s=%s", change.Setting, *change.OriginalValue)},
-				system.RunCmdOpts{Check: true, Capture: true},
-			)
-			if err != nil {
-				return nil, fmt.Errorf("failed to revert %s: %w", change.Setting, err)
-			}
-			reverted = append(reverted, &model.HostStateChangeItem{
-				SessionID:     change.SessionID,
-				InitTimestamp: change.InitTimestamp,
-				Setting:       change.Setting,
-				Mechanism:     "sysctl",
-				AppliedValue:  *change.OriginalValue,
-				Reverted:      false,
-				ChangeOrder:   change.ChangeOrder,
-				CreatedAt:     change.CreatedAt,
-				OriginalValue: &change.AppliedValue,
-			})
-			wasReverted = true
-
-		} else if change.Mechanism == "file_create" {
-			target := system.ResolvePath(change.AppliedValue)
-			allowed := slices.Contains(resolvedAllowedFiles, target)
-			if !allowed {
-				slog.Debug("Skipping disallowed file path from state", "path", target)
-				continue
-			}
-			if _, err := os.Stat(target); err == nil {
-				if change.OriginalValue != nil {
-					// Validate sudoers content if the target is under sudoers dir
-					if strings.HasPrefix(target, infra.DefaultSudoersDir) {
-						result, _ := system.DefaultRunner.Run(ctx, []string{"visudo", "-c", "-f", "-"},
-							system.RunCmdOpts{Check: false, Capture: true, Input: *change.OriginalValue})
-						if !result.Success() {
-							return nil, errs.New(
-								errs.CodeHostResetFailed,
-								fmt.Sprintf(
-									"Sudoers content from state failed visudo validation: %s",
-									result.Stderr,
-								),
-								errs.WithClass(errs.ClassInternal),
-							)
-						}
-					}
-					if err := os.WriteFile(target, []byte(*change.OriginalValue), 0644); err != nil {
-						return nil, errs.New(
-							errs.CodeHostResetFailed,
-							fmt.Sprintf(
-								"Failed to revert file %s: %v",
-								target,
-								err,
-							),
-							errs.WithClass(errs.ClassInternal),
-						)
-					}
-				} else {
-					if err := os.Remove(target); err != nil {
-						return nil, errs.New(
-							errs.CodeHostResetFailed,
-							fmt.Sprintf(
-								"Failed to revert file %s: %v",
-								target,
-								err,
-							),
-							errs.WithClass(errs.ClassInternal),
-						)
-					}
-				}
-				appliedVal := "(removed)"
-				if change.OriginalValue != nil {
-					appliedVal = *change.OriginalValue
-				}
-				reverted = append(reverted, &model.HostStateChangeItem{
-					SessionID:     change.SessionID,
-					InitTimestamp: change.InitTimestamp,
-					Setting:       change.Setting,
-					Mechanism:     "file_remove",
-					AppliedValue:  appliedVal,
-					Reverted:      false,
-					ChangeOrder:   change.ChangeOrder,
-					CreatedAt:     change.CreatedAt,
-					OriginalValue: &change.AppliedValue,
-				})
-				wasReverted = true
-			}
-		}
-
-		if wasReverted && change.ID != nil {
-			if err := s.repo.MarkChangeReverted(ctx, *change.ID, revertedAt, nil); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return reverted, nil
 }

@@ -1,6 +1,10 @@
 # Snapshot-Based Instant VM Cloning & Next-Level Optimizations
 
-> **STATUS: Snapshot domain implemented (Phase 2).** 
+> **STATUS: Historical optimization proposal.** The phase table records the earlier plan. Current v0.3.0 capture and
+> restore use root-authenticated authority and protected artifacts. The
+> [coverage checkpoint](../../tests/system/COVERAGE_MATRIX.md) records accepted candidate-bound evidence and
+> remaining scenario-specific limits.
+> See [Snapshot Functionality](../implementations/SNAPSHOT_DOMAIN.md) for the implemented contract and its limits.
 > | Phase | Status |
 > |-------|--------|
 > | Phase 1: Foundation (huge pages, cgroup v2, boot args) | ⚠️ Partial |
@@ -8,9 +12,12 @@
 > | Phase 3: Clone from Snapshot (`vm create --snapshot`) | ❌ Not started |
 > | Phase 4: Hot-Standby Pool | ❌ Not started |
 >
-> The snapshot domain (`internal/core/snapshot/`), CLI commands (`internal/cli/snapshot.go`), API layer (`pkg/api/snapshot.go`), and input validation (`pkg/api/inputs/snapshot.go`) are all implemented. The `SnapshotItem` model uses `SnapshotDir`, `MemoryFile`, `StateFile`, `RootfsFile`, `ImageID`, `ExtraConfig` (as `*SnapshotExtraConfig` struct). Firecracker snapshot/resume API is at `internal/lib/firecracker/client.go`. 
+> The snapshot domain (`internal/core/snapshot/`), CLI commands (`internal/cli/snapshot.go`), API layer (`pkg/api/snapshot.go`), and input validation (`pkg/api/inputs/snapshot.go`) are all implemented. The `SnapshotItem` model uses `SnapshotDir`, `MemoryFile`, `StateFile`, `RootfsFile`, `ImageID`, `ExtraConfig` (as `*SnapshotExtraConfig` struct). The typed Firecracker snapshot API is in `internal/service/jailer/snapshot_api.go`.
 >
-> **Last verified:** 2026-06-27
+> The original hardening plan below is superseded by
+> [ADR-0018](../adr/0018-isolated-vm-execution-and-snapshot-authority.md) and the implementation guide linked above.
+>
+> **Last verified:** 2026-08-28
 
 **Phase:** Multi-phase — spans 3-4 milestones
 **Complexity:** Very High
@@ -22,19 +29,24 @@
 
 ### 1.1 How Firecracker Snapshots Work
 
-When `PUT /snapshot/create` is called on a **paused** microVM, Firecracker produces two files:
+When `PUT /snapshot/create` is called on a **paused** microVM, Firecracker produces memory and vmstate files.
+The following historical layout also shows the separately copied rootfs; it is not the current protected-store layout:
 
 ```
 /home/user/.cache/mvmctl/snapshots/my-snapshot/
-├── vm.mem           ← Raw dump of ALL guest RAM pages
-├── vm.vmstate       ← Serde bitcode binary format (vCPU state, device state)
-├── rootfs.ext4      ← Frozen rootfs image at snapshot time
-└── metadata.json    ← Origin, kernel, image, timestamps
+├── memory           ← Raw dump of ALL guest RAM pages
+├── vmstate          ← Serde bitcode binary format (vCPU state, device state)
+└── rootfs.img       ← Fixed managed rootfs leaf; filesystem type is metadata
 ```
+
+The earlier implementation stored snapshot identity and origin metadata in SQLite and used a transitional
+`phantom-rootfs.img` symlink. That symlink is no longer part of the implementation. Root-owned capture metadata and
+protected artifacts now provide authority; SQLite retains local projections. See
+[SNAPSHOT_DOMAIN.md](../implementations/SNAPSHOT_DOMAIN.md) for current storage and restore behavior.
 
 **The mmap secret (MAP_PRIVATE):**
 - Pages are NOT read eagerly — they're demand-paged (loaded on first access)
-- The original `vm.mem` file is **never modified** — writes go to anonymous COW pages
+- The original `memory` file is **never modified** — writes go to anonymous COW pages
 - **Multiple processes can MAP_PRIVATE the same file simultaneously** — each gets independent COW
 - Loading the snapshot takes **~3-8ms** (just the mmap syscall + metadata), not the full RAM size
 
@@ -136,7 +148,7 @@ Use a **read-only base image** + **writable overlay** per VM. Zero copy, O(1) cr
 | Item | Status |
 |---|---|
 | Huge pages: add to `FirecrackerConfig` + host docs | ⚠️ Partial — hugepage detection implemented in `internal/core/host/detector.go` (reads `/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages`), stored in `host_state` schema, but not added to `FirecrackerConfig` struct and no host docs written. |
-| cgroup v2 + `kvm.nx_huge_pages=never` docs | ⚠️ Partial — cgroup v2 detection in `internal/core/host/detector.go` (checks `/sys/fs/cgroup/cgroup.controllers`), stored in `host_state` schema, but docs not written. |
+| cgroup v2 + `kvm.nx_huge_pages=never` docs | ⚠️ Partial — typed per-VM cgroup-v2 enforcement and host controller detection are implemented and documented; the separate `kvm.nx_huge_pages=never` host tuning remains unimplemented. |
 | Kernel boot args: add safe params | ⚠️ Partial (basic args exist) |
 
 ### Phase 2: Snapshot Domain (Weeks 2-3) ✅ DONE

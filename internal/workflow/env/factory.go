@@ -32,6 +32,28 @@ type StepFactory struct {
 // of scanning. Adding a new step type means adding a step_*.go file and
 // one entry here.
 var Registry = map[string]StepFactory{
+	"floating_ip": {
+		StepType:  "floating_ip",
+		FromSpec:  newFloatingIPStepFromSpec,
+		FromState: newFloatingIPStepFromState,
+	},
+	"floating_ip_grant": {
+		StepType:  "floating_ip_grant",
+		FromSpec:  newFloatingIPGrantStepFromSpec,
+		FromState: newFloatingIPGrantStepFromState,
+	},
+	"volume": {StepType: "volume", FromSpec: newVolumeStepFromSpec, FromState: newVolumeStepFromState},
+	"traffic_policy": {
+		StepType:  "traffic_policy",
+		FromSpec:  newTrafficPolicyStepFromSpec,
+		FromState: newTrafficPolicyStepFromState,
+	},
+	"exec_policy": {
+		StepType:  "exec_policy",
+		FromSpec:  newExecPolicyStepFromSpec,
+		FromState: newExecPolicyStepFromState,
+	},
+	"ready": {StepType: "ready", FromSpec: newReadyStepFromSpec, FromState: newReadyStepFromState},
 	"network": {
 		StepType:  "network",
 		FromSpec:  newNetworkStepFromSpec,

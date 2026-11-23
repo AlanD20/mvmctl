@@ -5,6 +5,13 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
+// HostInit reports the completed administrator setup changes.
+type HostInit struct {
+	Changes          []*model.HostStateChangeItem `json:"changes"`
+	UserAddedToGroup bool                         `json:"user_added_to_group"`
+	SessionHasGroup  bool                         `json:"session_has_group"`
+}
+
 // HostOSInfo groups OS-level host information.
 type HostOSInfo struct {
 	Kernel  string `json:"kernel"`
@@ -38,10 +45,10 @@ type HostHugepagesInfo struct {
 
 // HostDepsInfo groups dependency availability information.
 type HostDepsInfo struct {
-	NftablesAvailable     bool `json:"nftables_available"`
-	IptablesAvailable     bool `json:"iptables_available"`
-	CloudLocaldsAvailable bool `json:"cloud_localds_available"`
-	DevNetTUNAccessible   bool `json:"dev_net_tun"`
+	NftablesAvailable     bool   `json:"nftables_available"`
+	NftablesProbeError    string `json:"nftables_probe_error,omitempty"`
+	CloudLocaldsAvailable bool   `json:"cloud_localds_available"`
+	DevNetTUNAccessible   bool   `json:"dev_net_tun"`
 }
 
 // HostSystemInfo groups system-level host information.
@@ -132,7 +139,6 @@ type HostInfo struct {
 	Kernel         HostKernelInfo    `json:"kernel"`
 	Limits         HostLimitsInfo    `json:"limits"`
 	Capacity       HostCapacityInfo  `json:"capacity"`
-	Setup          HostSetupInfo     `json:"setup"`
 }
 
 // BuildHostInfo builds a HostInfoResponse from model data.
@@ -170,7 +176,7 @@ func BuildHostInfo(hi *model.HostInfo) *HostInfo {
 		},
 		Dependencies: HostDepsInfo{
 			NftablesAvailable:     hi.Resources.NftablesAvailable,
-			IptablesAvailable:     hi.Resources.IptablesAvailable,
+			NftablesProbeError:    hi.Resources.NftablesProbeError,
 			CloudLocaldsAvailable: hi.Resources.CloudLocaldsAvailable,
 			DevNetTUNAccessible:   hi.Resources.DevNetTUNAccessible,
 		},
@@ -211,10 +217,6 @@ func BuildHostInfo(hi *model.HostInfo) *HostInfo {
 			},
 			RecommendedMaxVMs: hi.Resources.RecommendedMaxVMs,
 			LimitingResource:  hi.Resources.LimitingResource,
-		},
-		Setup: HostSetupInfo{
-			Initialized:   hi.State.Initialized,
-			InitializedAt: hi.State.InitializedAt,
 		},
 	}
 }

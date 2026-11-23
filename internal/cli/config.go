@@ -39,6 +39,7 @@ func newConfigGetCmd(configAPI api.ConfigAPI) *cobra.Command {
 			}
 
 			val, err := configAPI.ConfigGet(cmd.Context(), category, key)
+			common.RecordResult(val)
 			if err != nil {
 				common.Cli.Error(err.Error())
 				return err
@@ -119,6 +120,7 @@ func newConfigResetCmd(configAPI api.ConfigAPI) *cobra.Command {
 					}
 				}
 				deleted, err := configAPI.ConfigReset(cmd.Context(), "", "", true)
+				common.RecordResult(deleted)
 				if err != nil {
 					return err
 				}
@@ -128,10 +130,14 @@ func newConfigResetCmd(configAPI api.ConfigAPI) *cobra.Command {
 
 			switch len(args) {
 			case 0:
+				if common.StructuredOutput() {
+					return fmt.Errorf("provide a category, category and key, or use --all")
+				}
 				common.Cli.Text("Provide a category, category and key, or use --all")
 			case 1:
 				category := args[0]
 				deleted, err := configAPI.ConfigReset(cmd.Context(), category, "", false)
+				common.RecordResult(deleted)
 				if err != nil {
 					return err
 				}
@@ -140,6 +146,7 @@ func newConfigResetCmd(configAPI api.ConfigAPI) *cobra.Command {
 				category := args[0]
 				key := args[1]
 				deleted, err := configAPI.ConfigReset(cmd.Context(), category, key, false)
+				common.RecordResult(deleted)
 				if err != nil {
 					return err
 				}
@@ -166,6 +173,7 @@ func newConfigListCmd(configAPI api.ConfigAPI) *cobra.Command {
 		Short:   "List all overridable settings and their current values.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			allSettings, err := configAPI.ConfigListAll(cmd.Context())
+			common.RecordResult(allSettings)
 			if err != nil {
 				common.Cli.Error(err.Error())
 				return err

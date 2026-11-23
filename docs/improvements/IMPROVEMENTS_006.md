@@ -1,8 +1,10 @@
 # JSON output mode
 
-> **STATUS: 🔶 Partial — per-command `--json` flags exist on `inspect`, `ls`, `status`, and `info` commands (see `internal/cli/` for each domain). There is NO global `--json` flag on the root CLI group. Mutation commands (`create`, `remove`) lack `--json` output. The API layer already returns structured data; only the CLI renderer needs switching.
+> **STATUS: Historical proposal — global JSON output is implemented.** The root command defines a persistent
+> `--json` flag for supported finite reads and mutations. See the [command reference](../REFERENCES.md) for the
+> current response envelope and exclusions. The design and illustrative output below predate that contract.
 >
-> **Last verified:** 2026-06-27
+> **Status checked:** 2026-10-16 against `internal/cli/root.go` and VM creation result handling in `internal/cli/vm.go`.
 
 **Phase:** Standalone — orthogonal to all features
 **Complexity:** Low

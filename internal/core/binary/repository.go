@@ -11,13 +11,18 @@ type Repository interface {
 	// Get returns a binary by its full 64-char ID, or nil if not found.
 	Get(ctx context.Context, id string) (*model.BinaryItem, error)
 	// FindByPrefix returns all binaries whose ID starts with prefix.
-	FindByPrefix(ctx context.Context, prefix string, includeDeleted ...bool) ([]*model.BinaryItem, error)
+	FindByPrefix(
+		ctx context.Context,
+		prefix string,
+		architecture string,
+		includeDeleted ...bool,
+	) ([]*model.BinaryItem, error)
 	// ListAll returns all non-deleted binaries ordered by created_at.
-	ListAll(ctx context.Context) ([]*model.BinaryItem, error)
+	ListAll(ctx context.Context, architecture string) ([]*model.BinaryItem, error)
 	// ListByType returns all binaries with a given type.
-	ListByType(ctx context.Context, typ string) ([]*model.BinaryItem, error)
-	// GetByTypeAndVersion returns a binary by type and version, or nil.
-	GetByTypeAndVersion(ctx context.Context, typ, version string) (*model.BinaryItem, error)
+	ListByType(ctx context.Context, typ, architecture string) ([]*model.BinaryItem, error)
+	// GetByTypeAndVersion returns a binary by type, architecture, and version, or nil.
+	GetByTypeAndVersion(ctx context.Context, typ, architecture, version string) (*model.BinaryItem, error)
 	// Upsert inserts or replaces a binary record.
 	Upsert(ctx context.Context, binary *model.BinaryItem) error
 	// Delete hard-deletes a binary by ID.
@@ -27,13 +32,23 @@ type Repository interface {
 	// DeleteByTypeAndVersion deletes the binary row matching type AND version.
 	DeleteByTypeAndVersion(ctx context.Context, typ, version string) error
 	// SetDefault sets a binary as default, clearing all others with the same type.
-	SetDefault(ctx context.Context, typ, id string) error
+	SetDefault(ctx context.Context, typ, architecture, id string) error
 	// Count returns total count of all non-deleted binaries.
 	Count(ctx context.Context) (int, error)
 	// GetDefault returns the default binary for a given type, or nil.
-	GetDefault(ctx context.Context, typ string) (*model.BinaryItem, error)
+	GetDefault(ctx context.Context, typ, architecture string) (*model.BinaryItem, error)
 	// SoftDelete soft-deletes a binary by setting deleted_at and is_present=0.
 	SoftDelete(ctx context.Context, id string) error
 	// UpdateManyIsPresent bulk updates is_present flag for multiple binaries.
 	UpdateManyIsPresent(ctx context.Context, ids []string, present bool) error
+	// ReplaceReleaseProjection atomically reconciles one complete root-derived release pair.
+	ReplaceReleaseProjection(
+		ctx context.Context,
+		architecture string,
+		version string,
+		pair *model.BinaryPair,
+		setDefault bool,
+	) error
+	// RemoveReleaseProjection soft-deletes the exact architecture/version release slot.
+	RemoveReleaseProjection(ctx context.Context, architecture, version string) error
 }

@@ -29,15 +29,6 @@ func Spawn(ctx context.Context, cfg Config, ptyFile *os.File) (*SpawnResult, err
 	if cfg.VMName != "" {
 		args = append(args, "--vm-name", cfg.VMName)
 	}
-	if cfg.PIDFilename != "" {
-		args = append(args, "--pid-filename", cfg.PIDFilename)
-	}
-	if cfg.SocketFilename != "" {
-		args = append(args, "--socket-filename", cfg.SocketFilename)
-	}
-	if cfg.LogFilename != "" {
-		args = append(args, "--log-filename", cfg.LogFilename)
-	}
 
 	cmd, err := system.SpawnService(nil, system.SpawnConfig{
 		Name:       "console",
@@ -54,14 +45,14 @@ func Spawn(ctx context.Context, cfg Config, ptyFile *os.File) (*SpawnResult, err
 	pid := cmd.Process.Pid
 
 	// Write PID file alongside the socket.
-	pidFilePath := filepath.Join(cfg.VMPath, cfg.PIDFilename)
+	pidFilePath := filepath.Join(cfg.VMPath, infra.VMConsolePIDFilename)
 	if pidDir := filepath.Dir(pidFilePath); pidDir != "." {
 		os.MkdirAll(pidDir, infra.DirPerm)
 	}
 	os.WriteFile(pidFilePath, []byte(strconv.Itoa(pid)), 0644)
 
 	// Wait for subprocess to create the socket.
-	socketPath := filepath.Join(cfg.VMPath, cfg.SocketFilename)
+	socketPath := filepath.Join(cfg.VMPath, infra.VMConsoleSocketFilename)
 	for range 50 {
 		if _, err := os.Stat(socketPath); err == nil {
 			return &SpawnResult{

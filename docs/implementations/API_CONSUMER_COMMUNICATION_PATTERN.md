@@ -154,7 +154,8 @@ Optional callback for **long-running or multi-phase operations** so consumers ca
 | `Operation.ImagePull` | `onProgress` callback — extract → optimize phases |
 | `Operation.KernelPull` | `onProgress` callback — download → build phases |
 
-Fast operations (VMRemove, VMStart/Stop, NetworkCreate, HostInit, etc.) do not emit progress.
+Progress support is defined by each method's signature. `HostInit` also accepts an `onProgress` callback;
+its ordinary API path returns an administrator-setup interaction. Consult the per-domain interfaces for current types.
 
 ### Struct Definition
 
@@ -280,7 +281,7 @@ The `dispatch` method switches on `interaction.Code`:
 
 | Domain | File | Mutation methods return | Progress via |
 |--------|------|------------------------|--------------|
-| **Host** | `pkg/api/host.go` | `(any, error)` / `*errs.NeedsInteraction` | N/A |
+| **Host** | `pkg/api/host.go` | Typed results, including `(*results.HostInit, error)`; setup can return `*errs.NeedsInteraction` | `onProgress` parameter on `HostInit` |
 | **VM** | `pkg/api/vm.go` | `([]*model.VMItem, error)` / `*errs.BatchResult` | `onProgress` (create only) |
 | **Volume** | `pkg/api/volume.go` | `(*model.VolumeItem, error)` / `*errs.BatchResult` | N/A |
 | **Network** | `pkg/api/network.go` | `(*model.NetworkItem, error)` / `error` | N/A |
@@ -355,7 +356,8 @@ return &errs.BatchResult{Items: results}
 
 ## Appendix: Master Code Table
 
-Every `code` value currently used in the codebase (defined in `pkg/errs/codes.go`):
+The table below is a historical subset of error codes. The current complete declarations are in
+[`pkg/errs/codes.go`](../../pkg/errs/codes.go), including policy and privileged-lifecycle codes added after this table.
 
 | Code | Status | Domain | Meaning |
 |------|--------|--------|---------|

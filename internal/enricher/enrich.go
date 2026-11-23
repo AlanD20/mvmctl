@@ -365,7 +365,7 @@ func (e *Enricher) enrichVMBinary(ctx context.Context, vms []*model.VMItem, spec
 
 // enrichVMNetwork resolves VM network references via batch network ID lookup.
 func (e *Enricher) enrichVMNetwork(ctx context.Context, vms []*model.VMItem, spec model.RelationSpec) error {
-	ids := collectUniqueVMStrings(vms, func(vm *model.VMItem) string { return vm.NetworkID })
+	ids := collectUniqueVMStrings(vms, func(vm *model.VMItem) string { return string(vm.NetworkID) })
 	if len(ids) == 0 {
 		return nil
 	}
@@ -384,7 +384,7 @@ func (e *Enricher) enrichVMNetwork(ctx context.Context, vms []*model.VMItem, spe
 	}
 	for _, vm := range vms {
 		if vm.NetworkID != "" {
-			vm.Network = networks[vm.NetworkID]
+			vm.Network = networks[string(vm.NetworkID)]
 		}
 	}
 	return nil
@@ -693,7 +693,8 @@ func (e *Enricher) enrichNetworkVMs(ctx context.Context, networks []*model.Netwo
 
 	vmsByNetID := make(map[string][]*model.VMItem)
 	for _, vm := range vms {
-		vmsByNetID[vm.NetworkID] = append(vmsByNetID[vm.NetworkID], vm)
+		networkID := string(vm.NetworkID)
+		vmsByNetID[networkID] = append(vmsByNetID[networkID], vm)
 	}
 
 	for _, net := range networks {

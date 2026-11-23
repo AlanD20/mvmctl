@@ -1,119 +1,115 @@
-version: "1"
+version: '1'
 ephemeral: true
-
-# Builds the reusable k8s-base image with k8s packages pre-installed.
-# Run once, then use k8s-controller.yaml and k8s-worker.yaml.
-
 network:
   k8s:
-    subnet: "10.10.0.0/16"
+    subnet: 10.10.0.0/16
     nat_enabled: true
-
 key:
   k8s-key:
     algorithm: ed25519
-
 image:
   os-image:
     type: ubuntu-minimal
-    version: "24.04"
-
+    version: '24.04'
 kernel:
   full-kernel:
     type: official
-    version: "7.0.11"
-    features: "all"
-
+    version: 7.0.11
+    features: all
 binary:
   fc-binary:
     type: firecracker
-    version: "1.16.0"
-
+    version: 1.16.0
 vm:
   builder:
-    network: "@network:k8s"
-    key: "@key:k8s-key"
-    image: "@image:os-image"
-    kernel: "@kernel:full-kernel"
-    binary: "@binary:fc-binary"
+    network: '@network:k8s'
+    key: '@key:k8s-key'
+    image: '@image:os-image'
+    kernel: '@kernel:full-kernel'
+    binary: '@binary:fc-binary'
     vcpu: 1
     mem: 1G
     disk_size: 8G
     writeback: true
     depends_on:
-      - "@network:k8s"
-      - "@key:k8s-key"
-      - "@image:os-image"
-      - "@kernel:full-kernel"
-      - "@binary:fc-binary"
-
+    - '@network:k8s'
+    - '@key:k8s-key'
+    - '@image:os-image'
+    - '@kernel:full-kernel'
+    - '@binary:fc-binary'
 exec:
   provision:
-    target: "@vm:builder"
+    target: '@vm:builder'
     cmd: bash /tmp/k8s-provision-base
     depends_on:
-      - "@copy:k8s-provision-base"
-
+    - '@copy:k8s-provision-base'
 copy:
   k8s-join:
     src: scripts/k8s-join
     dest: builder:/usr/local/bin/k8s-join
     force: true
     depends_on:
-      - "@exec:provision"
-
+    - '@exec:provision'
   k8s-configure-hosts:
     src: scripts/k8s-configure-hosts
     dest: builder:/usr/local/bin/k8s-configure-hosts
     force: true
     depends_on:
-      - "@exec:provision"
-
+    - '@exec:provision'
   k8s-controller-primary:
     src: scripts/k8s-controller-primary
     dest: builder:/usr/local/bin/k8s-controller-primary
     force: true
     depends_on:
-      - "@exec:provision"
-
+    - '@exec:provision'
   k8s-seed-token:
     src: scripts/k8s-seed-token
     dest: builder:/usr/local/bin/k8s-seed-token
     force: true
     depends_on:
-      - "@exec:provision"
-
+    - '@exec:provision'
   k8s-seed-controller-token:
     src: scripts/k8s-seed-controller-token
     dest: builder:/usr/local/bin/k8s-seed-controller-token
     force: true
     depends_on:
-      - "@exec:provision"
-
+    - '@exec:provision'
   k8s-provision-base:
     src: scripts/k8s-provision-base
     dest: builder:/tmp/k8s-provision-base
     force: true
     depends_on:
-      - "@vm:builder"
-
-  k8s-keepalived:
-    src: scripts/k8s-keepalived
-    dest: builder:/usr/local/bin/k8s-keepalived
+    - '@vm:builder'
+  k8s-api-lease:
+    src: scripts/k8s-api-lease
+    dest: builder:/usr/local/bin/k8s-api-lease
     force: true
     depends_on:
-      - "@exec:provision"
-
+    - '@exec:provision'
+  k8s-api-lease-setup:
+    src: scripts/k8s-api-lease-setup
+    dest: builder:/usr/local/bin/k8s-api-lease-setup
+    force: true
+    depends_on:
+    - '@exec:provision'
+  k8s-cilium:
+    src: scripts/k8s-cilium
+    dest: builder:/usr/local/bin/k8s-cilium
+    force: true
+    depends_on:
+    - '@exec:provision'
 image_import:
   k8s-base:
-    source: "@vm:builder"
+    source: '@vm:builder'
     version: latest
     skip_optimization: true
     force: true
     depends_on:
-      - "@copy:k8s-join"
-      - "@copy:k8s-configure-hosts"
-      - "@copy:k8s-controller-primary"
-      - "@copy:k8s-seed-token"
-      - "@copy:k8s-seed-controller-token"
-      - "@copy:k8s-keepalived"
+    - '@copy:k8s-join'
+    - '@copy:k8s-configure-hosts'
+    - '@copy:k8s-controller-primary'
+    - '@copy:k8s-seed-token'
+    - '@copy:k8s-seed-controller-token'
+    - '@copy:k8s-api-lease'
+    - '@copy:k8s-api-lease-setup'
+    - '@copy:k8s-cilium'

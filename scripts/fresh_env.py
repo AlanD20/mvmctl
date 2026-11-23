@@ -198,7 +198,7 @@ def _build_chain_cmd(kernel_filename: str, image_filename: str) -> str:
         '&& echo "=== [6/8] mvm kernel import ===" '
         f"&& mvm kernel import {KERNEL_SELECTOR} /mnt/{kernel_filename} --version 7.0.11 --default "
         '&& echo "=== [7/8] mvm bin pull ===" '
-        "&& MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker --version 1.15.1 --default --force"
+        "&& MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker:1.15.1 --default --force"
         '&& echo "=== [8/8] mvm vm create ===" '
         f"&& mvm vm create {NESTED_VM_NAME} --vcpu 2 --mem 512m --nested-virt -s 4g"
     )
